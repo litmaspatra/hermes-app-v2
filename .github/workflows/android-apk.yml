@@ -1,0 +1,53 @@
+name: Android APK (test build)
+
+# Builds a signed APK you can download from the run page (Actions → this run → Artifacts).
+# Signing: if the repo secret KEYSTORE_B64 exists (base64 of your keystore, alias "hermes", password
+# "hermesmobile") the APK is signed with it and updates an install signed with the same key.
+# Without the secret a throwaway key is generated: that APK cannot update an app signed with another key.
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/v2]
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: npm ci
+        working-directory: web
+      - name: Web tests
+        run: npm test --silent
+        working-directory: web
+      - name: Pure-Java unit tests (approval policy, voice commands)
+        run: bash tools/java-unit-tests.sh
+      - name: Android SDK pieces
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;35.0.0" >/dev/null
+      - name: Build the APK
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            export KEYSTORE="$RUNNER_TEMP/release.keystore"
+          else
+            echo "No KEYSTORE_B64 secret: using a throwaway test key"
+          fi
+          VERSION_NAME="2.0.0-test" VERSION_CODE=$(( 20000 + GITHUB_RUN_NUMBER )) android/build.sh
+          rm -f "$RUNNER_TEMP/release.keystore"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hermes-mobile-apk
+          path: android/build/hermes-mobile.apk
+          retention-days: 14

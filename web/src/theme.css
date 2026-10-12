@@ -1,0 +1,227 @@
+/* The three looks of the app. Every colour, border, radius, shadow and blur comes from the tokens below.
+   material (default): the base palette in styles.css (Default, OLED black, Light, System) + Material You accents (theme.ts)
+   neo:   Neo-brutalism, light only
+   glass: Glassmorphism, light only
+   The page sets <html data-style="material|neo|glass" data-theme="default|oled|light">; neo and glass force data-theme=light. */
+
+:root {
+  --border-w: 1px;
+  --shadow: none;
+  --blur: 0px;
+}
+
+/* ── Material 3 (default): tonal surfaces, rounder shapes, no heavy outlines ───────────────── */
+:root[data-style='material'] {
+  --radius: 16px;
+}
+/* the old light accent (#b57a10) gave white text only 3.6:1; this one gives 5:1 or more */
+:root[data-style='material'][data-theme='light'] {
+  --accent: #9a6508;
+  --accent-2: #8f5f06;
+}
+:root[data-style='material'] .set-card { border-radius: 20px; border-color: transparent; background: var(--surface-2); }
+:root[data-style='material'] .sheet { border-radius: 28px 28px 0 0; border-top-color: transparent; }
+:root[data-style='material'] .btn { border-radius: 20px; border-color: transparent; }
+:root[data-style='material'] .composer { border-radius: 28px; border-color: transparent; background: var(--surface-2); }
+:root[data-style='material'] .msg.user .bubble { border-radius: 20px 20px 6px 20px; border-color: transparent; }
+
+/* ── Neo-brutalism: thick black borders, hard offset shadows, flat saturated colour ───────── */
+:root[data-style='neo'] {
+  --bg: #fff6e5;
+  --surface: #ffffff;
+  --surface-2: #ffe9b8;
+  --border: #000000;
+  --text: #000000;
+  --dim: #3d3d3d;
+  --accent: #ff6fae;
+  --accent-2: #ffd43b;
+  --accent-ink: #000000;
+  --ok: #076b38;
+  --warn: #6b4200;
+  --err: #b3120a;
+  --user: #ffd43b;
+  --radius: 6px;
+  --code-bg: #ffffff;
+  --warn-bg: #ffe9b8;
+  --warn-border: #000000;
+  --err-border: #000000;
+  --user-border: #000000;
+  --switch-on: #3ddc84;
+  --mark-bg: #ffd43b;
+  --press: rgba(0, 0, 0, 0.14);
+  --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --border-w: 3px;
+  --shadow: 4px 4px 0 #000000;
+  color-scheme: light;
+}
+:root[data-style='neo'] body,
+:root[data-style='neo'] .app { font-weight: 500; }
+:root[data-style='neo'] .set-card,
+:root[data-style='neo'] .sheet,
+:root[data-style='neo'] .btn,
+:root[data-style='neo'] .composer,
+:root[data-style='neo'] .toast,
+:root[data-style='neo'] .card,
+:root[data-style='neo'] .chip,
+:root[data-style='neo'] .drawer,
+:root[data-style='neo'] .msg.user .bubble,
+:root[data-style='neo'] .theme-card,
+:root[data-style='neo'] .sheet-code,
+:root[data-style='neo'] .risk-chip {
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+:root[data-style='neo'] .sheet { border-radius: var(--radius) var(--radius) 0 0; box-shadow: 0 -4px 0 #000000; }
+:root[data-style='neo'] .topbar,
+:root[data-style='neo'] .composer-wrap { border-bottom-width: var(--border-w); border-top-width: var(--border-w); border-color: var(--border); }
+:root[data-style='neo'] .set-row + .set-row,
+:root[data-style='neo'] .set-row + div .set-row,
+:root[data-style='neo'] .set-card > div + .set-row { border-top-width: 2px; }
+:root[data-style='neo'] .btn,
+:root[data-style='neo'] .send,
+:root[data-style='neo'] .icon-btn { font-weight: 800; }
+:root[data-style='neo'] .btn:active,
+:root[data-style='neo'] .send:active { transform: translate(4px, 4px); box-shadow: none; }
+:root[data-style='neo'] .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: #000000; }
+:root[data-style='neo'] .btn.danger { background: #ffffff; color: var(--err); }
+:root[data-style='neo'] .send { border: var(--border-w) solid #000000; box-shadow: 3px 3px 0 #000000; }
+:root[data-style='neo'] .theme-card.on { background: var(--accent-2); }
+:root[data-style='neo'] .switch { border: 2px solid #000000; }
+:root[data-style='neo'] .sheet-backdrop { background: rgba(0, 0, 0, 0.45); }
+
+/* ── Glassmorphism: frosted translucent surfaces over a soft gradient ───────────────────── */
+:root[data-style='glass'] {
+  --bg: #e6e1f7;
+  --surface: rgba(255, 255, 255, 0.5);
+  --surface-2: rgba(255, 255, 255, 0.68);
+  --border: rgba(255, 255, 255, 0.85);
+  --text: #14161a;
+  --dim: #444a55;
+  --accent: #4a3ccb;
+  --accent-2: #3a2fa8;
+  --accent-ink: #ffffff;
+  --ok: #0b6b3f;
+  --warn: #6b4a00;
+  --err: #a8201a;
+  --user: rgba(74, 60, 203, 0.2);
+  --radius: 18px;
+  --code-bg: rgba(255, 255, 255, 0.7);
+  --warn-bg: rgba(255, 238, 190, 0.8);
+  --warn-border: rgba(150, 110, 0, 0.35);
+  --err-border: rgba(168, 32, 26, 0.35);
+  --user-border: rgba(74, 60, 203, 0.35);
+  --switch-on: rgba(74, 60, 203, 0.35);
+  --mark-bg: rgba(255, 214, 90, 0.7);
+  --press: rgba(20, 22, 26, 0.08);
+  --blur: 16px;
+  --shadow: 0 8px 28px rgba(60, 50, 120, 0.18);
+  color-scheme: light;
+}
+:root[data-style='glass'] body,
+:root[data-style='glass'] #root,
+:root[data-style='glass'] html {
+  background: linear-gradient(140deg, #cdbdff 0%, #a6e8e1 55%, #ffd9c0 100%) fixed;
+}
+:root[data-style='glass'] .set-card,
+:root[data-style='glass'] .sheet,
+:root[data-style='glass'] .composer,
+:root[data-style='glass'] .toast,
+:root[data-style='glass'] .card,
+:root[data-style='glass'] .drawer,
+:root[data-style='glass'] .topbar,
+:root[data-style='glass'] .composer-wrap {
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(140%);
+  backdrop-filter: blur(var(--blur)) saturate(140%);
+}
+:root[data-style='glass'] .set-card,
+:root[data-style='glass'] .composer,
+:root[data-style='glass'] .card,
+:root[data-style='glass'] .toast { box-shadow: var(--shadow); border-radius: var(--radius); }
+:root[data-style='glass'] .topbar,
+:root[data-style='glass'] .composer-wrap { background: rgba(255, 255, 255, 0.35); }
+:root[data-style='glass'] .btn { border-radius: 14px; background: var(--surface-2); }
+:root[data-style='glass'] .msg.user .bubble { border-radius: 20px 20px 6px 20px; }
+:root[data-style='glass'] .sheet { border-radius: 24px 24px 0 0; background: rgba(255, 255, 255, 0.78); }
+/* Reduce effects: no blur; surfaces become nearly opaque so text stays readable. */
+:root[data-style='glass'][data-reduce] {
+  --blur: 0px;
+  --surface: rgba(255, 255, 255, 0.9);
+  --surface-2: rgba(255, 255, 255, 0.95);
+}
+:root[data-style='glass'][data-reduce] .set-card,
+:root[data-style='glass'][data-reduce] .sheet,
+:root[data-style='glass'][data-reduce] .composer,
+:root[data-style='glass'][data-reduce] .toast,
+:root[data-style='glass'][data-reduce] .card,
+:root[data-style='glass'][data-reduce] .drawer,
+:root[data-style='glass'][data-reduce] .topbar,
+:root[data-style='glass'][data-reduce] .composer-wrap { -webkit-backdrop-filter: none; backdrop-filter: none; }
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-style='glass'] { --blur: 0px; --surface: rgba(255, 255, 255, 0.9); --surface-2: rgba(255, 255, 255, 0.95); }
+  :root[data-style='glass'] .set-card,
+  :root[data-style='glass'] .sheet,
+  :root[data-style='glass'] .composer,
+  :root[data-style='glass'] .toast,
+  :root[data-style='glass'] .card,
+  :root[data-style='glass'] .drawer,
+  :root[data-style='glass'] .topbar,
+  :root[data-style='glass'] .composer-wrap { -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+
+/* ── shared by every style: the approval risk chip and the new settings widgets ──────────── */
+.risk-chip {
+  align-self: flex-start;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--err);
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 0.82rem;
+}
+.style-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 10px; }
+.style-card { border: 2px solid var(--border); border-radius: 14px; padding: 8px; text-align: left; background: var(--surface-2); }
+.style-card.on { border-color: var(--accent); }
+.style-prev { height: 54px; border-radius: 8px; position: relative; overflow: hidden; margin-bottom: 6px; }
+.style-prev i { position: absolute; display: block; }
+.style-name { font-weight: 600; font-size: 0.85rem; display: flex; justify-content: space-between; }
+.rule-list { display: flex; flex-direction: column; }
+.rule-row { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--border); }
+.rule-row:first-child { border-top: 0; }
+.rule-main { flex: 1; min-width: 0; }
+.rule-prog { font-family: var(--mono); font-weight: 700; }
+.rule-note { font-size: 0.78rem; color: var(--dim); overflow-wrap: anywhere; }
+.rule-del { color: var(--err); padding: 6px 10px; font-weight: 700; }
+.rule-add { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); }
+.rule-add input, .test-box input { flex: 1; min-width: 0; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); }
+.test-box { display: flex; gap: 8px; padding: 10px 14px; }
+.test-out { padding: 0 14px 12px; font-size: 0.85rem; overflow-wrap: anywhere; }
+.test-out.allow { color: var(--ok); }
+.test-out.ask { color: var(--warn); }
+.hist-row { padding: 10px 14px; border-top: 1px solid var(--border); }
+.hist-row:first-child { border-top: 0; }
+.hist-top { display: flex; justify-content: space-between; gap: 8px; font-size: 0.78rem; color: var(--dim); }
+.hist-text { font-family: var(--mono); font-size: 0.85rem; overflow-wrap: anywhere; margin-top: 2px; }
+.hist-dec { font-size: 0.82rem; margin-top: 2px; }
+.warn-text { color: var(--warn); font-size: 0.82rem; padding: 0 14px 10px; }
+
+/* style picker previews (Settings → Appearance) */
+.style-prev.material { background: #f3edf7; }
+.style-prev.material .a { left: 8px; top: 8px; width: 60%; height: 10px; border-radius: 6px; background: #6750a4; }
+.style-prev.material .b { left: 8px; top: 26px; width: 80%; height: 10px; border-radius: 6px; background: #e8def8; }
+.style-prev.material .c { right: 8px; bottom: 6px; width: 18px; height: 18px; border-radius: 50%; background: #6750a4; }
+.style-prev.neo { background: #fff6e5; border: 3px solid #000000; }
+.style-prev.neo .a { left: 6px; top: 6px; width: 55%; height: 12px; background: #ffd43b; border: 2px solid #000000; box-shadow: 2px 2px 0 #000000; }
+.style-prev.neo .b { left: 6px; top: 26px; width: 70%; height: 10px; background: #ff6fae; border: 2px solid #000000; box-shadow: 2px 2px 0 #000000; }
+.style-prev.neo .c { right: 6px; bottom: 4px; width: 14px; height: 14px; background: #3ddc84; border: 2px solid #000000; }
+.style-prev.glass { background: linear-gradient(140deg, #cdbdff, #a6e8e1 55%, #ffd9c0); }
+.style-prev.glass .a { left: 8px; top: 8px; width: 60%; height: 12px; border-radius: 8px; background: rgba(255, 255, 255, 0.6); border: 1px solid rgba(255, 255, 255, 0.9); }
+.style-prev.glass .b { left: 8px; top: 26px; width: 78%; height: 10px; border-radius: 8px; background: rgba(255, 255, 255, 0.45); border: 1px solid rgba(255, 255, 255, 0.9); }
+.style-prev.glass .c { right: 8px; bottom: 6px; width: 18px; height: 18px; border-radius: 50%; background: rgba(74, 60, 203, 0.7); }
+
+/* the light theme paints some text white (on the old gold accent): in the other styles use the style's own ink */
+:root[data-style='neo'] .send:not(.mic):not(.live-btn):not(.stop),
+:root[data-style='neo'] .avatar,
+:root[data-style='neo'] .btn.danger-solid,
+:root[data-style='neo'] .btn.primary { color: var(--accent-ink); }
+:root[data-style='neo'] .risk-chip { background: var(--err); color: #ffffff; }

@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  web:
+    name: Web (typecheck, unit tests, build, browser e2e)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            tools/web-e2e/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm test
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+      - name: Browser e2e against the mock Hermes
+        working-directory: tools/web-e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          ./run.sh
+
+  plugin:
+    name: Plugin (canvas + media)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install fastapi httpx
+      - run: python3 tools/test_canvas.py
+      - run: python3 tools/test_media.py
+      - run: python3 tools/test_chat_search.py
+      - run: python3 tools/test_checkpoints.py
+      - run: python3 tools/test_battery.py
+      - run: python3 tools/test_approval.py
+
+  android:
+    name: Android Java compiles
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/hermes-mobile
+          key: android-all-16
+      - run: tools/java-check.sh

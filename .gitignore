@@ -1,0 +1,9 @@
+node_modules/
+web/dist/
+android/build/
+android/assets/www/
+__pycache__/
+*.pyc
+.DS_Store
+*.keystore
+out/

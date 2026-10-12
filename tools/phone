@@ -1,0 +1,6 @@
+#!/bin/bash
+# SSH into Termux on an Android phone (key-only sshd on :8022, reached through adb).
+# Usage: tools/phone '<command>'   (runs in Termux; wrap in `proot-distro login debian -- bash -lc '…'` for Debian)
+adb forward tcp:8022 tcp:8022 >/dev/null 2>&1
+exec ssh -p 8022 -i "$HOME/.ssh/hermes_phone_ed25519" -o BatchMode=yes -o ServerAliveInterval=15 \
+  -o UserKnownHostsFile="$HOME/.ssh/known_hosts_hermes_phone" localhost "$@"

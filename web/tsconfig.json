@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": false,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "verbatimModuleSyntax": false,
+    "paths": { "@hermes/shared/*": ["./vendor/hermes-shared/*"] }
+  },
+  "include": ["src", "vendor/desktop-slash-registry.json", "vendor/hermes-shared/json-rpc-gateway.ts", "vendor/hermes-shared/gateway-events.ts"]
+}

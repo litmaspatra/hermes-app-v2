@@ -1,0 +1,14 @@
+name: hermes-mobile
+version: 1.0.0
+description: Companion for the Hermes Mobile Android app — phone notifications when a reply finishes or Hermes needs you (works while the app is closed), plus a memory API for the app's Memory screen.
+author: omarqaterge
+provides_hooks:
+  - on_stream_start
+  - on_stream_end
+  - pre_tool_call
+  - post_tool_call
+  - on_skill_lifecycle
+  - subagent_start
+  - pre_approval_request
+  - on_session_end
+  - api_request_error

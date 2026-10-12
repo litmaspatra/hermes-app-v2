@@ -1,0 +1,47 @@
+name: Release
+
+# Push a tag like v0.8.0 and this builds the APK and attaches it to a GitHub release,
+# which phone/install.sh downloads. Needs the repo secret KEYSTORE_B64 (base64 of the signing keystore):
+# every release must be signed with the same key, or phones can't update.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: npm ci
+        working-directory: web
+      - name: Android SDK pieces
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;35.0.0" >/dev/null
+      - name: Build the APK
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          [ -n "$KEYSTORE_B64" ] || { echo "Set the KEYSTORE_B64 secret first"; exit 1; }
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          v="${GITHUB_REF_NAME#v}"; IFS=. read -r a b c <<< "$v"
+          KEYSTORE="$RUNNER_TEMP/release.keystore" VERSION_NAME="$v" \
+            VERSION_CODE=$(( a * 10000 + b * 100 + ${c:-0} )) android/build.sh
+          rm -f "$RUNNER_TEMP/release.keystore"
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" android/build/hermes-mobile.apk \
+            --title "Hermes Mobile $GITHUB_REF_NAME" \
+            --notes "Install: run the one-line installer from the README in Termux, or download hermes-mobile.apk below on your phone. Setup steps: https://github.com/${{ github.repository }}#setup"

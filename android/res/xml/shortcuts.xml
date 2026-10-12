@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press the app icon: New chat, Live mode (the last chat is added at run time, see MainActivity.setLastChat). -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="new_chat"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/sc_new"
+        android:shortcutLongLabel="@string/sc_new">
+        <intent
+            android:action="com.omarqaterge.hermesmobile.SHORTCUT"
+            android:targetPackage="com.omarqaterge.hermesmobile"
+            android:targetClass="com.omarqaterge.hermesmobile.MainActivity">
+            <extra android:name="shortcut" android:value="new" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="live"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/sc_live"
+        android:shortcutLongLabel="@string/sc_live_long">
+        <intent
+            android:action="com.omarqaterge.hermesmobile.SHORTCUT"
+            android:targetPackage="com.omarqaterge.hermesmobile"
+            android:targetClass="com.omarqaterge.hermesmobile.MainActivity">
+            <extra android:name="shortcut" android:value="live" />
+        </intent>
+    </shortcut>
+</shortcuts>

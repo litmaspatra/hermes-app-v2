@@ -1,0 +1,8 @@
+#!/bin/bash
+# Call Hermes's gateway (the same JSON-RPC the app uses) on the phone and print the result.
+# Usage: tools/gw <method> ['<json params>']      e.g. tools/gw session.list '{"limit":5}'
+# Read-only methods are safe; anything that creates/deletes sessions touches the user's real data.
+DIR=$(cd "$(dirname "$0")" && pwd)
+M=$(printf %s "$1" | tr -cd 'A-Za-z0-9._')
+P=$(printf %s "${2:-{\}}" | base64 | tr -d '\n')
+"$DIR/phone" "proot-distro login debian -- bash -lc 'PY=\$(ls -td /root/.hermes/installs/*/environments/*/venv/bin/python3 | head -1); exec \$PY - $M $P'" < "$DIR/gw_rpc.py"

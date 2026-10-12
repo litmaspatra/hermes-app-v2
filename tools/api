@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+"""Call the phone's Hermes dashboard REST API (the same one the app's httpAsync bridge uses).
+Usage: tools/api GET /api/profiles        tools/api PUT /api/env '{"key":"X","value":"y"}'
+Forwards tcp:9119 over adb first. GETs are safe; writes change the user's real Hermes setup."""
+import json
+import re
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+
+HERMES = "http://127.0.0.1:9119"
+subprocess.run(["adb", "forward", "tcp:9119", "tcp:9119"], capture_output=True)
+html = urllib.request.urlopen(HERMES + "/", timeout=10).read().decode()
+token = re.search(r'__HERMES_SESSION_TOKEN__\s*=\s*"([^"]+)"', html).group(1)
+method, path = sys.argv[1].upper(), sys.argv[2]
+body = sys.argv[3].encode() if len(sys.argv) > 3 else None
+req = urllib.request.Request(HERMES + path, data=body, method=method,
+                             headers={"X-Hermes-Session-Token": token, "Content-Type": "application/json"})
+try:
+    with urllib.request.urlopen(req, timeout=60) as r:
+        status, out = r.status, r.read().decode()
+except urllib.error.HTTPError as e:
+    status, out = e.code, e.read().decode()
+try:
+    out = json.dumps(json.loads(out), indent=2)
+except ValueError:
+    pass
+print(out)
+if status >= 400:
+    sys.exit(f"HTTP {status}")

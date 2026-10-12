@@ -1,7 +1,9 @@
 package com.omarqaterge.hermesmobile;
 
 import android.content.ClipData;
+import android.content.BroadcastReceiver;
 import android.content.ClipDescription;
+import android.content.IntentFilter;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
@@ -92,6 +94,15 @@ final class IslandOverlay {
     private Mood prevMood = Mood.SLEEP;
     private boolean listening;
     private String listenText = "";
+    private float downX, downY;
+    private boolean holding;
+    private Runnable holdFire;
+    private final BroadcastReceiver screenState = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context c, Intent i) {
+            render(); // the lock screen came or went: the hold zone changes size
+        }
+    };
     private PetView pet;
     private TextView title, sub;
     private LinearLayout approvalBox, dropBox, buttons;
@@ -112,7 +123,24 @@ final class IslandOverlay {
         this.ui = new ContextThemeWrapper(svc, android.R.style.Theme_DeviceDefault);
         this.wm = svc.getSystemService(WindowManager.class);
         this.density = svc.getResources().getDisplayMetrics().density;
+        this.holdFire = () -> {
+            if (holding && !panelOpen) {
+                holding = false;
+                svc.startListening();
+            }
+        };
         main.post(this::build);
+        IntentFilter f = new IntentFilter();
+        f.addAction(Intent.ACTION_SCREEN_ON);
+        f.addAction(Intent.ACTION_SCREEN_OFF);
+        f.addAction(Intent.ACTION_USER_PRESENT);
+        if (Build.VERSION.SDK_INT >= 33) svc.registerReceiver(screenState, f, Context.RECEIVER_NOT_EXPORTED);
+        else svc.registerReceiver(screenState, f);
+    }
+
+    /** Tap and hold only counts on the lock screen (so typing and normal use never trigger it). */
+    private boolean holdZoneActive() {
+        return svc.getSharedPreferences("hm", Context.MODE_PRIVATE).getBoolean("hold_listen", true) && VoiceActions.locked(svc);
     }
 
     int dp(float v) {
@@ -176,6 +204,10 @@ final class IslandOverlay {
     void destroy() {
         main.post(() -> {
             destroyed = true;
+            try {
+                svc.unregisterReceiver(screenState);
+            } catch (Exception ignored) {
+            }
             remove();
         });
     }
@@ -210,6 +242,31 @@ final class IslandOverlay {
         if (destroyed || root != null) return;
         root = new Root(ui);
         root.setOnDragListener(this::onDrag);
+        root.setOnTouchListener((v, e) -> {
+            if (!holdZoneActive()) return false;
+            int hold = svc.getSharedPreferences("hm", Context.MODE_PRIVATE).getInt("hold_ms", 600);
+            switch (e.getActionMasked()) {
+                case android.view.MotionEvent.ACTION_DOWN:
+                    downX = e.getRawX();
+                    downY = e.getRawY();
+                    holding = true;
+                    main.postDelayed(holdFire, Math.max(300, Math.min(1500, hold)));
+                    return true;
+                case android.view.MotionEvent.ACTION_MOVE:
+                    if (Math.abs(e.getRawX() - downX) > dp(24) || Math.abs(e.getRawY() - downY) > dp(24)) {
+                        holding = false;
+                        main.removeCallbacks(holdFire);
+                    }
+                    return true;
+                case android.view.MotionEvent.ACTION_UP:
+                case android.view.MotionEvent.ACTION_CANCEL:
+                    holding = false;
+                    main.removeCallbacks(holdFire);
+                    return true;
+                default:
+                    return true;
+            }
+        });
 
         col = new LinearLayout(ui);
         col.setOrientation(LinearLayout.VERTICAL);
@@ -236,6 +293,10 @@ final class IslandOverlay {
         header.addView(texts, tp);
         header.setOnClickListener(v -> svc.islandOpenApp());
         header.setOnLongClickListener(v -> {
+            if (holdZoneActive() && !panelOpen) {
+                svc.startListening(); // lock screen: tap and hold the island
+                return true;
+            }
             if (state.mood == Mood.SLEEP && !panelOpen) {
                 hiddenIdle = true; // idle only: it comes back as soon as Hermes works
                 render();
@@ -361,11 +422,19 @@ final class IslandOverlay {
             return;
         }
         ensureAdded();
+        if (added && lp.y != topOffset()) {
+            lp.y = topOffset();
+            try {
+                wm.updateViewLayout(root, lp);
+            } catch (Exception ignored) {
+            }
+        }
         applyTheme(full);
 
         boolean approving = state.approval != null;
         Mood m = listening ? Mood.LISTEN : dragging ? Mood.DROP : state.mood;
         pet.setMood(m);
+        pet.setSpecies(svc.getSharedPreferences("hm", Context.MODE_PRIVATE).getString("pet", "cat"));
 
         String t;
         String s = state.sub == null ? "" : state.sub;
@@ -400,8 +469,9 @@ final class IslandOverlay {
         }
         dropBox.setVisibility(panelOpen && !dragging && !listening ? View.VISIBLE : View.GONE);
 
-        root.setMinimumWidth(!full ? dp(120) : dragging ? dp(250) : panelOpen || showApproval ? dp(300) : 0);
-        root.setMinimumHeight(!full ? dp(20) : dragging ? dp(64) : 0);
+        boolean zone = !full && holdZoneActive(); // a bigger invisible target to hold on the lock screen
+        root.setMinimumWidth(!full ? (zone ? dp(220) : dp(120)) : dragging ? dp(250) : panelOpen || showApproval ? dp(300) : 0);
+        root.setMinimumHeight(!full ? (zone ? dp(72) : dp(20)) : dragging ? dp(64) : 0);
         root.invalidate();
     }
 
@@ -521,10 +591,10 @@ final class IslandOverlay {
         lp = new WindowManager.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN | WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED,
                 PixelFormat.TRANSLUCENT);
         lp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-        lp.y = dp(6);
+        lp.y = topOffset();
         lp.setTitle("Hermes island");
         try {
             wm.addView(root, lp);
@@ -533,6 +603,14 @@ final class IslandOverlay {
         } catch (Exception e) {
             added = false; // permission revoked meanwhile: the service drops the island on its next refresh
         }
+    }
+
+    /** Top of the island. With the system's own island also on, sit below the status bar so it doesn't cover ours. */
+    private int topOffset() {
+        if (!svc.systemChipWanted()) return dp(6);
+        int id = svc.getResources().getIdentifier("status_bar_height", "dimen", "android");
+        int bar = id > 0 ? svc.getResources().getDimensionPixelSize(id) : dp(28);
+        return bar + dp(4);
     }
 
     private void remove() {
@@ -868,31 +946,125 @@ final class IslandOverlay {
             if (running && isAttachedToWindow()) postInvalidateDelayed(mood == Mood.SLEEP ? 90 : 40);
         }
 
+        private String species = "cat";
+        private int fur = FUR, earIn = EAR, ink = INK;
+
+        void setSpecies(String sp) {
+            if (sp == null || sp.equals(species)) return;
+            species = sp;
+            invalidate();
+        }
+
+        private boolean is(String s) {
+            return species.equals(s);
+        }
+
+        /** One face for every species: head, ears, eyes, nose and mouth change; the moods and motion are shared. */
         private void drawCat(Canvas c, float r, float sec) {
             boolean sad = mood == Mood.SAD;
-            // ears
-            for (int side = -1; side <= 1; side += 2) {
-                path.reset();
-                float tipX = side * r * (sad ? 1.1f : 0.78f), tipY = sad ? -r * 0.78f : -r * 1.18f;
-                path.moveTo(side * r * 0.97f, -r * 0.15f);
-                path.lineTo(tipX, tipY);
-                path.lineTo(side * r * 0.12f, -r * 0.82f);
-                path.close();
-                fill.setColor(FUR);
-                c.drawPath(path, fill);
-                path.reset();
-                path.moveTo(side * r * 0.82f, -r * 0.3f);
-                path.lineTo(side * r * (sad ? 0.98f : 0.74f), sad ? -r * 0.72f : -r * 0.98f);
-                path.lineTo(side * r * 0.3f, -r * 0.78f);
-                path.close();
-                fill.setColor(EAR);
-                c.drawPath(path, fill);
+            boolean happy = mood == Mood.HAPPY || mood == Mood.DROP;
+            switch (species) {
+                case "dog": fur = 0xFFD9A066; earIn = 0xFFA66F3A; break;
+                case "fox": fur = 0xFFE8742C; earIn = 0xFF3A2A22; break;
+                case "panda": fur = 0xFFF4F4F4; earIn = 0xFF2B2B2F; break;
+                case "bunny": fur = 0xFFF6EEF0; earIn = 0xFFF5A9C0; break;
+                case "robot": fur = 0xFF8FA3B8; earIn = 0xFF5B6B7D; break;
+                default: fur = FUR; earIn = EAR;
+            }
+            ink = INK;
+            // ears (behind the head)
+            if (is("dog")) {
+                for (int side = -1; side <= 1; side += 2) { // floppy ears hanging down the sides
+                    c.save();
+                    c.rotate(side * (sad ? 8f : 22f), side * r * 0.85f, -r * 0.55f);
+                    fill.setColor(earIn);
+                    rect.set(side * r * 0.85f - r * 0.32f, -r * 0.75f, side * r * 0.85f + r * 0.32f, r * 0.55f);
+                    c.drawOval(rect, fill);
+                    c.restore();
+                }
+            } else if (is("bunny")) {
+                for (int side = -1; side <= 1; side += 2) {
+                    float lean = sad ? 0.35f : 0.1f;
+                    c.save();
+                    c.rotate(side * (sad ? 28f : 8f), side * r * 0.45f, -r * 0.7f);
+                    fill.setColor(fur);
+                    rect.set(side * r * 0.45f - r * 0.27f, -r * (2.0f - lean), side * r * 0.45f + r * 0.27f, -r * 0.6f);
+                    c.drawOval(rect, fill);
+                    fill.setColor(earIn);
+                    rect.set(side * r * 0.45f - r * 0.13f, -r * (1.8f - lean), side * r * 0.45f + r * 0.13f, -r * 0.75f);
+                    c.drawOval(rect, fill);
+                    c.restore();
+                }
+            } else if (is("panda")) {
+                for (int side = -1; side <= 1; side += 2) {
+                    fill.setColor(earIn);
+                    c.drawCircle(side * r * 0.78f, -r * 0.78f, r * 0.34f, fill);
+                }
+            } else if (is("robot")) {
+                // antenna with a light that follows the mood
+                line.setColor(earIn);
+                line.setStrokeWidth(Math.max(1.5f, r * 0.09f));
+                c.drawLine(0, -r * 0.85f, 0, -r * 1.3f, line);
+                fill.setColor(mood == Mood.ALERT ? RED : mood == Mood.HAPPY ? GREEN : GOLD);
+                c.drawCircle(0, -r * 1.38f, r * (0.13f + 0.04f * (float) Math.sin(sec * 6)), fill);
+            } else { // cat and fox: pointed ears
+                boolean fox = is("fox");
+                for (int side = -1; side <= 1; side += 2) {
+                    path.reset();
+                    float tipX = side * r * (sad ? 1.1f : 0.78f), tipY = sad ? -r * 0.78f : -r * (fox ? 1.4f : 1.18f);
+                    path.moveTo(side * r * 0.97f, -r * 0.15f);
+                    path.lineTo(tipX, tipY);
+                    path.lineTo(side * r * 0.12f, -r * 0.82f);
+                    path.close();
+                    fill.setColor(fur);
+                    c.drawPath(path, fill);
+                    path.reset();
+                    path.moveTo(side * r * 0.82f, -r * 0.3f);
+                    path.lineTo(side * r * (sad ? 0.98f : 0.74f), sad ? -r * 0.72f : -r * (fox ? 1.15f : 0.98f));
+                    path.lineTo(side * r * 0.3f, -r * 0.78f);
+                    path.close();
+                    fill.setColor(fox ? earIn : EAR);
+                    c.drawPath(path, fill);
+                }
             }
             // head
-            fill.setColor(FUR);
-            rect.set(-r * 1.08f, -r * 0.92f, r * 1.08f, r * 0.92f);
-            c.drawOval(rect, fill);
-            if (mood == Mood.HAPPY || mood == Mood.DROP) {
+            fill.setColor(fur);
+            if (is("robot")) {
+                rect.set(-r * 1.05f, -r * 0.85f, r * 1.05f, r * 0.85f);
+                c.drawRoundRect(rect, r * 0.3f, r * 0.3f, fill);
+                fill.setColor(0xFF2B3440);
+                rect.set(-r * 0.85f, -r * 0.6f, r * 0.85f, r * 0.3f);
+                c.drawRoundRect(rect, r * 0.2f, r * 0.2f, fill); // dark visor
+            } else {
+                rect.set(-r * 1.08f, -r * 0.92f, r * 1.08f, r * 0.92f);
+                c.drawOval(rect, fill);
+            }
+            if (is("fox")) { // white cheeks
+                fill.setColor(0xFFFFF3E6);
+                path.reset();
+                path.moveTo(-r * 1.0f, r * 0.1f);
+                path.lineTo(0, r * 0.95f);
+                path.lineTo(r * 1.0f, r * 0.1f);
+                path.quadTo(0, r * 0.35f, -r * 1.0f, r * 0.1f);
+                c.drawPath(path, fill);
+            } else if (is("dog")) { // lighter muzzle
+                fill.setColor(0xFFF0D3A8);
+                rect.set(-r * 0.5f, r * 0.0f, r * 0.5f, r * 0.8f);
+                c.drawOval(rect, fill);
+            } else if (is("panda")) { // dark eye patches
+                fill.setColor(earIn);
+                c.save();
+                c.rotate(-18f, -r * 0.42f, -r * 0.08f);
+                rect.set(-r * 0.72f, -r * 0.4f, -r * 0.12f, r * 0.24f);
+                c.drawOval(rect, fill);
+                c.restore();
+                c.save();
+                c.rotate(18f, r * 0.42f, -r * 0.08f);
+                rect.set(r * 0.12f, -r * 0.4f, r * 0.72f, r * 0.24f);
+                c.drawOval(rect, fill);
+                c.restore();
+            }
+            if (happy && !is("robot")) {
                 fill.setColor(0x66F2A5A0);
                 c.drawCircle(-r * 0.7f, r * 0.25f, r * 0.2f, fill);
                 c.drawCircle(r * 0.7f, r * 0.25f, r * 0.2f, fill);
@@ -900,7 +1072,9 @@ final class IslandOverlay {
             // eyes
             float ex = r * 0.42f, ey = -r * 0.08f, er = r * 0.2f;
             boolean blink = (sec % 3.4f) > 3.28f;
-            line.setColor(INK);
+            boolean robot = is("robot");
+            int eyeCol = robot ? (mood == Mood.ALERT ? RED : GOLD) : ink;
+            line.setColor(robot ? eyeCol : ink);
             line.setStrokeWidth(Math.max(1.5f, r * 0.1f));
             for (int side = -1; side <= 1; side += 2) {
                 float x = side * ex;
@@ -916,9 +1090,9 @@ final class IslandOverlay {
                         c.drawArc(rect, 200, 140, false, line);
                         break;
                     case ALERT: {
-                        fill.setColor(Color.WHITE);
+                        fill.setColor(robot ? RED : Color.WHITE);
                         c.drawCircle(x, ey, er * 1.45f, fill);
-                        fill.setColor(INK);
+                        fill.setColor(robot ? Color.WHITE : ink);
                         c.drawCircle(x, ey, er * 0.55f, fill);
                         break;
                     }
@@ -926,41 +1100,58 @@ final class IslandOverlay {
                         float look = mood == Mood.THINK ? 1f : 0f;
                         float px = look * er * 0.3f * (float) Math.sin(sec * 1.4), py = -look * er * 0.3f;
                         float k = blink ? 0.12f : (mood == Mood.ASK && side > 0 ? 1.3f : 1f);
-                        fill.setColor(INK);
+                        fill.setColor(eyeCol);
                         rect.set(x - er * 0.75f + px, ey - er * k + py, x + er * 0.75f + px, ey + er * k + py);
-                        c.drawOval(rect, fill);
-                        if (!blink) {
+                        if (robot) c.drawRoundRect(rect, er * 0.3f, er * 0.3f, fill);
+                        else c.drawOval(rect, fill);
+                        if (!blink && !robot) {
                             fill.setColor(Color.WHITE);
                             c.drawCircle(x - er * 0.2f + px, ey - er * 0.35f + py, er * 0.28f, fill);
                         }
                         if (sad) {
+                            line.setColor(robot ? Color.WHITE : ink);
                             line.setStrokeWidth(Math.max(1.2f, r * 0.08f));
                             c.drawLine(x - side * er * 1.1f, ey - er * 1.5f, x + side * er * 0.9f, ey - er * 1.1f, line);
                             line.setStrokeWidth(Math.max(1.5f, r * 0.1f));
+                            line.setColor(eyeCol);
                         }
                     }
                 }
             }
             // nose and mouth
-            fill.setColor(EAR);
+            line.setColor(robot ? 0xFFCFD6DE : ink);
+            line.setStrokeWidth(Math.max(1.2f, r * 0.07f));
+            if (robot) {
+                if (happy) {
+                    rect.set(-r * 0.4f, r * 0.2f, r * 0.4f, r * 0.62f);
+                    c.drawArc(rect, 0, 180, false, line);
+                } else if (sad) {
+                    rect.set(-r * 0.35f, r * 0.4f, r * 0.35f, r * 0.8f);
+                    c.drawArc(rect, 200, 140, false, line);
+                } else {
+                    for (int k = -1; k <= 1; k++) c.drawLine(k * r * 0.28f, r * 0.4f, k * r * 0.28f, r * 0.62f, line);
+                }
+                return;
+            }
+            fill.setColor(is("panda") || is("dog") ? ink : is("fox") ? 0xFF2B2B2F : EAR);
             path.reset();
-            path.moveTo(-r * 0.1f, r * 0.14f);
-            path.lineTo(r * 0.1f, r * 0.14f);
-            path.lineTo(0, r * 0.26f);
+            float nw = is("dog") ? 0.17f : 0.1f;
+            path.moveTo(-r * nw, r * 0.12f);
+            path.lineTo(r * nw, r * 0.12f);
+            path.lineTo(0, r * (is("dog") ? 0.3f : 0.26f));
             path.close();
             c.drawPath(path, fill);
-            line.setColor(INK);
-            line.setStrokeWidth(Math.max(1.2f, r * 0.07f));
-            if (mood == Mood.HAPPY || mood == Mood.DROP) {
+            line.setColor(ink);
+            if (happy) {
                 path.reset();
                 path.moveTo(-r * 0.28f, r * 0.34f);
                 path.quadTo(0, r * 0.82f, r * 0.28f, r * 0.34f);
                 path.close();
-                fill.setColor(INK);
+                fill.setColor(ink);
                 c.drawPath(path, fill);
             } else if (mood == Mood.ALERT) {
                 rect.set(-r * 0.11f, r * 0.36f, r * 0.11f, r * 0.62f);
-                fill.setColor(INK);
+                fill.setColor(ink);
                 c.drawOval(rect, fill);
             } else if (sad) {
                 rect.set(-r * 0.25f, r * 0.42f, r * 0.25f, r * 0.74f);
@@ -971,12 +1162,14 @@ final class IslandOverlay {
                 rect.set(0, r * 0.2f, r * 0.24f, r * 0.46f);
                 c.drawArc(rect, 20, 160, false, line);
             }
-            // whiskers
-            line.setColor(0x88FFFFFF);
-            line.setStrokeWidth(Math.max(1f, r * 0.05f));
-            for (int side = -1; side <= 1; side += 2)
-                for (int k = -1; k <= 1; k++)
-                    c.drawLine(side * r * 0.62f, r * 0.3f + k * r * 0.1f, side * r * 1.25f, r * 0.26f + k * r * 0.24f, line);
+            // whiskers: cat and fox only
+            if (is("cat") || is("fox")) {
+                line.setColor(0x88FFFFFF);
+                line.setStrokeWidth(Math.max(1f, r * 0.05f));
+                for (int side = -1; side <= 1; side += 2)
+                    for (int k = -1; k <= 1; k++)
+                        c.drawLine(side * r * 0.62f, r * 0.3f + k * r * 0.1f, side * r * 1.25f, r * 0.26f + k * r * 0.24f, line);
+            }
         }
 
         private void drawExtra(Canvas c, float w, float h, float sec) {

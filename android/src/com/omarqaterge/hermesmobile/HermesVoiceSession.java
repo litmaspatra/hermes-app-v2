@@ -40,6 +40,7 @@ public class HermesVoiceSession extends VoiceInteractionSession {
         box.setBackground(g);
         pet = new IslandOverlay.PetView(getContext());
         pet.setMood(IslandOverlay.Mood.LISTEN);
+        pet.setSpecies(getContext().getSharedPreferences("hm", Context.MODE_PRIVATE).getString("pet", "cat"));
         box.addView(pet, new LinearLayout.LayoutParams((int) (44 * d), (int) (38 * d)));
         text = new TextView(getContext());
         text.setTextColor(Color.WHITE);

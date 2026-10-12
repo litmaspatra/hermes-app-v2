@@ -107,6 +107,15 @@ export function StyleSection() {
 
 // ── Island ──────────────────────────────────────────────────
 
+const PETS = [
+  { id: 'cat', label: 'Cat', emoji: '🐱' },
+  { id: 'dog', label: 'Dog', emoji: '🐶' },
+  { id: 'fox', label: 'Fox', emoji: '🦊' },
+  { id: 'panda', label: 'Panda', emoji: '🐼' },
+  { id: 'bunny', label: 'Bunny', emoji: '🐰' },
+  { id: 'robot', label: 'Robot', emoji: '🤖' }
+]
+
 export function IslandPage() {
   const [s, set] = useNative()
   if (!hasNativeV2() || !s) return <NoPhone />
@@ -118,12 +127,25 @@ export function IslandPage() {
       </Section>
       {s.island && (
         <>
+          <Section title="Pet" footer="Your pet reacts to what Hermes is doing: sleeping, thinking, working, asking, happy, worried. It looks the same in every theme.">
+            <div className="pet-grid">
+              {PETS.map(p => (
+                <button key={p.id} className={`pet-card${s.pet === p.id ? ' on' : ''}`} onClick={() => { haptic(); set('pet', p.id) }}>
+                  <span className="pet-emoji">{p.emoji}</span>
+                  <span className="pet-name">{p.label}</span>
+                </button>
+              ))}
+            </div>
+          </Section>
           <Section title="When to show it" footer="On demand: hidden while idle. It appears when Hermes works, an approval waits, you drag something, or you trigger voice. A tiny invisible strip at the top centre stays so a drag has somewhere to land, and it blocks touches in that spot.">
             <Segmented
               options={[{ value: 'ondemand', label: 'On demand' }, { value: 'always', label: 'Always' }]}
               value={s.island_mode}
               onChange={v => set('island_mode', v)}
             />
+          </Section>
+          <Section footer="The system's own island (the Live Update chip) would sit on top of this one, so it is turned off while the floating island is on. Turn this on to have both; the floating one then moves below the status bar.">
+            <ToggleRow icon="🏝" tone="gray" title="Also show in the system island" on={s.system_chip} onChange={v => set('system_chip', v)} />
           </Section>
           <Section title="Drag and drop" footer="Drag an image, file, text or link from another app (gallery, browser, files) onto the island, type what Hermes should do, and it runs in the background. The other app must support dragging out; if not, use Share → Hermes.">
             <Row icon="🖼" tone="blue" title="Drop to ask" sub="No setting needed" />
@@ -146,15 +168,15 @@ export function VoiceCommandsPage() {
       </Section>
       {s.voice_enabled && (
         <>
-          <Section title="Triggers" footer="Corner swipe: choose Hermes as the phone’s digital assistant, then swipe in from a corner. Quick Settings: add the “Hermes listen” tile. Triple tap: three quick taps anywhere (needs the island permission). It can fire by accident while typing or gaming, so it is off by default. With the screen fully off, no trigger is possible.">
+          <Section title="Triggers" footer="Corner swipe: choose Hermes as the phone’s digital assistant, then swipe in from a corner; a small panel listens without opening the app. Quick Settings: add the “Hermes listen” tile. Lock screen: tap and hold near the top centre of the lock screen (it only works there, so typing never triggers it, and it needs the island permission). With the screen fully off, no trigger is possible.">
             <Row icon="↗️" tone="gold" title="Corner swipe assistant" value={s.assistant ? 'On' : 'Off'} sub="Opens a small listening panel" chevron onClick={() => (window.HermesAndroid as unknown as { openAssistantSettings?: () => void } | undefined)?.openAssistantSettings?.()} />
-            <ToggleRow icon="👆" tone="purple" title="Triple tap anywhere" on={s.triple_tap} onChange={v => set('triple_tap', v)} />
-            {s.triple_tap && (
+            <ToggleRow icon="👆" tone="purple" title="Hold on the lock screen" on={s.hold_listen} onChange={v => set('hold_listen', v)} />
+            {s.hold_listen && (
               <div className="pad">
                 <Segmented
-                  options={[{ value: 500, label: 'Fast' }, { value: 700, label: 'Normal' }, { value: 1000, label: 'Relaxed' }]}
-                  value={s.triple_ms <= 600 ? 500 : s.triple_ms <= 850 ? 700 : 1000}
-                  onChange={v => set('triple_ms', v)}
+                  options={[{ value: 400, label: 'Quick' }, { value: 600, label: 'Normal' }, { value: 900, label: 'Long' }]}
+                  value={s.hold_ms <= 500 ? 400 : s.hold_ms <= 750 ? 600 : 900}
+                  onChange={v => set('hold_ms', v)}
                 />
               </div>
             )}

@@ -33,9 +33,9 @@
   --border: #000000;
   --text: #000000;
   --dim: #3d3d3d;
-  --accent: #ff6fae;
+  --accent: #c2185b;
   --accent-2: #ffd43b;
-  --accent-ink: #000000;
+  --accent-ink: #ffffff;
   --ok: #076b38;
   --warn: #6b4200;
   --err: #b3120a;
@@ -56,6 +56,7 @@
 }
 :root[data-style='neo'] body,
 :root[data-style='neo'] .app { font-weight: 500; }
+:root[data-style='neo'] .suggestion,
 :root[data-style='neo'] .set-card,
 :root[data-style='neo'] .sheet,
 :root[data-style='neo'] .btn,
@@ -81,6 +82,7 @@
 :root[data-style='neo'] .btn,
 :root[data-style='neo'] .send,
 :root[data-style='neo'] .icon-btn { font-weight: 800; }
+:root[data-style='neo'] .suggestion:active,
 :root[data-style='neo'] .btn:active,
 :root[data-style='neo'] .send:active { transform: translate(4px, 4px); box-shadow: none; }
 :root[data-style='neo'] .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: #000000; }
@@ -90,83 +92,129 @@
 :root[data-style='neo'] .switch { border: 2px solid #000000; }
 :root[data-style='neo'] .sheet-backdrop { background: rgba(0, 0, 0, 0.45); }
 
-/* ── Glassmorphism: frosted translucent surfaces over a soft gradient ───────────────────── */
+/* ── Glassmorphism: frosted translucent panels floating over one soft, fixed colour field ───── */
 :root[data-style='glass'] {
-  --bg: #e6e1f7;
-  --surface: rgba(255, 255, 255, 0.5);
-  --surface-2: rgba(255, 255, 255, 0.68);
-  --border: rgba(255, 255, 255, 0.85);
+  --bg: #e9e4fb;
+  --surface: rgba(255, 255, 255, 0.46);
+  --surface-2: rgba(255, 255, 255, 0.66);
+  --border: rgba(255, 255, 255, 0.78);
   --text: #14161a;
-  --dim: #444a55;
+  --dim: #434955;
   --accent: #4a3ccb;
   --accent-2: #3a2fa8;
   --accent-ink: #ffffff;
   --ok: #0b6b3f;
   --warn: #6b4a00;
   --err: #a8201a;
-  --user: rgba(74, 60, 203, 0.2);
-  --radius: 18px;
-  --code-bg: rgba(255, 255, 255, 0.7);
-  --warn-bg: rgba(255, 238, 190, 0.8);
-  --warn-border: rgba(150, 110, 0, 0.35);
-  --err-border: rgba(168, 32, 26, 0.35);
-  --user-border: rgba(74, 60, 203, 0.35);
-  --switch-on: rgba(74, 60, 203, 0.35);
+  --user: rgba(74, 60, 203, 0.16);
+  --radius: 20px;
+  --code-bg: rgba(255, 255, 255, 0.72);
+  --warn-bg: rgba(255, 238, 190, 0.7);
+  --warn-border: rgba(150, 110, 0, 0.3);
+  --err-border: rgba(168, 32, 26, 0.3);
+  --user-border: rgba(74, 60, 203, 0.28);
+  --switch-on: rgba(74, 60, 203, 0.4);
   --mark-bg: rgba(255, 214, 90, 0.7);
   --press: rgba(20, 22, 26, 0.08);
-  --blur: 16px;
-  --shadow: 0 8px 28px rgba(60, 50, 120, 0.18);
+  --blur: 22px;
+  --shadow: 0 10px 30px rgba(70, 58, 140, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.85);
   color-scheme: light;
 }
-:root[data-style='glass'] body,
-:root[data-style='glass'] #root,
-:root[data-style='glass'] html {
-  background: linear-gradient(140deg, #cdbdff 0%, #a6e8e1 55%, #ffd9c0 100%) fixed;
+/* ONE backdrop, painted once, fixed behind everything (several elements each painting their own gradient left visible seams) */
+:root[data-style='glass'] { background: #e9e4fb; }
+:root[data-style='glass'] body { background: transparent; }
+:root[data-style='glass'] body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(70% 50% at 12% 8%, rgba(176, 150, 255, 0.85), transparent 70%),
+    radial-gradient(60% 45% at 95% 22%, rgba(120, 226, 214, 0.8), transparent 70%),
+    radial-gradient(65% 50% at 78% 98%, rgba(255, 190, 150, 0.8), transparent 70%),
+    radial-gradient(55% 45% at 2% 88%, rgba(255, 170, 215, 0.7), transparent 70%);
 }
+:root[data-style='glass'] #root,
+:root[data-style='glass'] .app,
+:root[data-style='glass'] .chat,
+:root[data-style='glass'] .screen { background: transparent; }
+:root[data-style='glass'] .topbar,
+:root[data-style='glass'] .composer-wrap,
 :root[data-style='glass'] .set-card,
 :root[data-style='glass'] .sheet,
 :root[data-style='glass'] .composer,
 :root[data-style='glass'] .toast,
 :root[data-style='glass'] .card,
 :root[data-style='glass'] .drawer,
+:root[data-style='glass'] .chip,
+:root[data-style='glass'] .suggestion,
+:root[data-style='glass'] .banner {
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(150%);
+  backdrop-filter: blur(var(--blur)) saturate(150%);
+}
 :root[data-style='glass'] .topbar,
 :root[data-style='glass'] .composer-wrap {
-  -webkit-backdrop-filter: blur(var(--blur)) saturate(140%);
-  backdrop-filter: blur(var(--blur)) saturate(140%);
+  background: rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.55);
 }
 :root[data-style='glass'] .set-card,
 :root[data-style='glass'] .composer,
 :root[data-style='glass'] .card,
-:root[data-style='glass'] .toast { box-shadow: var(--shadow); border-radius: var(--radius); }
-:root[data-style='glass'] .topbar,
-:root[data-style='glass'] .composer-wrap { background: rgba(255, 255, 255, 0.35); }
-:root[data-style='glass'] .btn { border-radius: 14px; background: var(--surface-2); }
-:root[data-style='glass'] .msg.user .bubble { border-radius: 20px 20px 6px 20px; }
-:root[data-style='glass'] .sheet { border-radius: 24px 24px 0 0; background: rgba(255, 255, 255, 0.78); }
-/* Reduce effects: no blur; surfaces become nearly opaque so text stays readable. */
+:root[data-style='glass'] .toast,
+:root[data-style='glass'] .suggestion,
+:root[data-style='glass'] .chip {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+:root[data-style='glass'] .composer { border-radius: 26px; background: rgba(255, 255, 255, 0.58); }
+:root[data-style='glass'] .banner { background: rgba(255, 244, 214, 0.6); border-color: rgba(255, 255, 255, 0.6); color: var(--warn); }
+:root[data-style='glass'] .btn { border-radius: 16px; background: var(--surface-2); border: 1px solid var(--border); box-shadow: var(--shadow); }
+:root[data-style='glass'] .btn.primary,
+:root[data-style='glass'] .send:not(.mic):not(.live-btn):not(.stop) {
+  background: linear-gradient(135deg, #6a5cf0, #4a3ccb);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 6px 18px rgba(74, 60, 203, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+:root[data-style='glass'] .msg.user .bubble {
+  border-radius: 22px 22px 8px 22px;
+  background: linear-gradient(135deg, rgba(106, 92, 240, 0.2), rgba(74, 60, 203, 0.14));
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow: var(--shadow);
+}
+:root[data-style='glass'] .sheet { border-radius: 28px 28px 0 0; background: rgba(255, 255, 255, 0.72); border: 1px solid rgba(255, 255, 255, 0.8); }
+:root[data-style='glass'] .sheet-backdrop { background: rgba(40, 30, 90, 0.28); }
+:root[data-style='glass'] .drawer { background: rgba(255, 255, 255, 0.55); border-right: 1px solid rgba(255, 255, 255, 0.7); }
+/* Reduce effects: no blur; panels become nearly opaque so text stays readable. */
 :root[data-style='glass'][data-reduce] {
   --blur: 0px;
-  --surface: rgba(255, 255, 255, 0.9);
-  --surface-2: rgba(255, 255, 255, 0.95);
+  --surface: rgba(255, 255, 255, 0.92);
+  --surface-2: rgba(255, 255, 255, 0.96);
 }
+:root[data-style='glass'][data-reduce] .topbar,
+:root[data-style='glass'][data-reduce] .composer-wrap,
 :root[data-style='glass'][data-reduce] .set-card,
 :root[data-style='glass'][data-reduce] .sheet,
 :root[data-style='glass'][data-reduce] .composer,
 :root[data-style='glass'][data-reduce] .toast,
 :root[data-style='glass'][data-reduce] .card,
 :root[data-style='glass'][data-reduce] .drawer,
-:root[data-style='glass'][data-reduce] .topbar,
-:root[data-style='glass'][data-reduce] .composer-wrap { -webkit-backdrop-filter: none; backdrop-filter: none; }
+:root[data-style='glass'][data-reduce] .chip,
+:root[data-style='glass'][data-reduce] .banner { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--surface-2); }
 @media (prefers-reduced-transparency: reduce) {
-  :root[data-style='glass'] { --blur: 0px; --surface: rgba(255, 255, 255, 0.9); --surface-2: rgba(255, 255, 255, 0.95); }
+  :root[data-style='glass'] { --blur: 0px; --surface: rgba(255, 255, 255, 0.92); --surface-2: rgba(255, 255, 255, 0.96); }
+  :root[data-style='glass'] .topbar,
+  :root[data-style='glass'] .composer-wrap,
   :root[data-style='glass'] .set-card,
   :root[data-style='glass'] .sheet,
   :root[data-style='glass'] .composer,
   :root[data-style='glass'] .toast,
   :root[data-style='glass'] .card,
   :root[data-style='glass'] .drawer,
-  :root[data-style='glass'] .topbar,
-  :root[data-style='glass'] .composer-wrap { -webkit-backdrop-filter: none; backdrop-filter: none; }
+  :root[data-style='glass'] .chip,
+  :root[data-style='glass'] .banner { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--surface-2); }
 }
 
 /* ── shared by every style: the approval risk chip and the new settings widgets ──────────── */
@@ -225,3 +273,10 @@
 :root[data-style='neo'] .btn.danger-solid,
 :root[data-style='neo'] .btn.primary { color: var(--accent-ink); }
 :root[data-style='neo'] .risk-chip { background: var(--err); color: #ffffff; }
+
+/* pet picker (Settings → Island) */
+.pet-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 10px; }
+.pet-card { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 6px; border: 2px solid var(--border); border-radius: 14px; background: var(--surface-2); }
+.pet-card.on { border-color: var(--accent); }
+.pet-emoji { font-size: 1.8rem; line-height: 1; }
+.pet-name { font-size: 0.8rem; font-weight: 600; }

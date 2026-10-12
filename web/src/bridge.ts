@@ -266,8 +266,10 @@ export interface NativeSettings {
   voice_calls_locked: boolean
   voice_msgs_locked: boolean
   voice_lang: string
-  triple_tap: boolean
-  triple_ms: number
+  hold_listen: boolean
+  hold_ms: number
+  pet: string
+  system_chip: boolean
   assistant: boolean
 }
 export interface AllowRule {

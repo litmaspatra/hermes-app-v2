@@ -234,7 +234,6 @@ public class HermesService extends Service {
         instance = null;
         if (voice != null) voice.destroy();
         if (island != null) island.destroy();
-        if (tapTrigger != null) tapTrigger.destroy();
         if (voiceCtl != null) voiceCtl.destroy();
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
         try {
@@ -565,7 +564,13 @@ public class HermesService extends Service {
     static final int GOLD = Color.parseColor("#D9A441"), GREEN = Color.parseColor("#3DBE7A"),
             RED = Color.parseColor("#E5564B"), AMBER = Color.parseColor("#E8912D");
 
+    /** True when the app's own floating island is on screen duty: then the system's island (Live Update chip) stays off. */
+    boolean systemChipWanted() {
+        return island == null || getSharedPreferences("hm", MODE_PRIVATE).getBoolean("system_chip", false);
+    }
+
     void promote(Notification.Builder b, String chip) {
+        if (!systemChipWanted()) return; // two islands on top of each other: the system one would cover ours
         Bundle extras = new Bundle();
         extras.putBoolean("android.requestPromotedOngoing", true);
         b.addExtras(extras);
@@ -721,7 +726,7 @@ public class HermesService extends Service {
         if (a.optBoolean("allow_session", true))
             b.addAction(new Notification.Action.Builder(null, colored("Allow session", GOLD), approveIntent(a, "session")).build());
         b.addAction(new Notification.Action.Builder(null, colored("✕ Deny", RED), approveIntent(a, "deny")).build());
-        promote(b, secs > 0 ? "🙀 " + secs + "s" : "🙀 !");
+        promote(b, secs > 0 ? petEmoji() + " " + secs + "s" : petEmoji() + "❗");
         return b.build();
     }
 
@@ -769,10 +774,12 @@ public class HermesService extends Service {
                 .setOnlyAlertOnce(true)
                 .setShowWhen(false)
                 .setContentIntent(openApp(lastSession));
-        Bundle extras = new Bundle();
-        extras.putBoolean("android.requestPromotedOngoing", true);
-        b.addExtras(extras);
-        if (Build.VERSION.SDK_INT >= 36) b.setShortCriticalText(flashChip == null ? "😸" : flashChip.replace("✅", "😸"));
+        if (systemChipWanted()) {
+            Bundle extras = new Bundle();
+            extras.putBoolean("android.requestPromotedOngoing", true);
+            b.addExtras(extras);
+            if (Build.VERSION.SDK_INT >= 36) b.setShortCriticalText(flashChip == null ? petEmoji() + "✨" : flashChip.replace("✅", petEmoji()));
+        }
         return b.build();
     }
 
@@ -1106,25 +1113,44 @@ public class HermesService extends Service {
         return IslandOverlay.Mood.SLEEP;
     }
 
-    /** Short text for the status-bar chip / Hyper Island: the pet's face for what it is doing (kept under ~7 characters). */
+    /** The chosen pet's face, for the system chip. */
+    String petEmoji() {
+        switch (getSharedPreferences("hm", MODE_PRIVATE).getString("pet", "cat")) {
+            case "dog":
+                return "🐶";
+            case "fox":
+                return "🦊";
+            case "panda":
+                return "🐼";
+            case "bunny":
+                return "🐰";
+            case "robot":
+                return "🤖";
+            default:
+                return "🐱";
+        }
+    }
+
+    /** Short text for the system chip (Hyper Island), only used when the app's own island is off or both are wanted. */
     String petChip() {
+        String e = petEmoji();
         switch (mood()) {
             case WORK: {
                 String s = lastShort == null ? "" : lastShort.trim();
-                return s.isEmpty() || s.length() > 6 ? "🐱🔧" : "🐱 " + s;
+                return s.isEmpty() || s.length() > 6 ? e + "🔧" : e + " " + s;
             }
             case ASK:
-                return "🐱❓";
+                return e + "❓";
             case LEARN:
-                return "🐱💡";
+                return e + "💡";
             case HAPPY:
-                return "😸";
+                return e + "✨";
             case SAD:
-                return "😿";
+                return e + "💧";
             case ALERT:
-                return "🙀";
+                return e + "❗";
             default:
-                return "🐱💭";
+                return e + "💭";
         }
     }
 
@@ -1162,7 +1188,6 @@ public class HermesService extends Service {
 
     // ── voice: triggers start it, VoiceController does it ──
     VoiceController voiceCtl;
-    TapTrigger tapTrigger;
 
     /** Main thread. Starts one spoken command, shown on the island. */
     void startListening() {
@@ -1201,15 +1226,6 @@ public class HermesService extends Service {
         }
     }
 
-    void refreshTrigger() {
-        boolean want = getSharedPreferences("hm", MODE_PRIVATE).getBoolean("triple_tap", false) && IslandOverlay.canShow(this);
-        if (want && tapTrigger == null) tapTrigger = new TapTrigger(this);
-        else if (!want && tapTrigger != null) {
-            tapTrigger.destroy();
-            tapTrigger = null;
-        }
-    }
-
     // ── the island ──
     /** Main thread: start or stop the island to match the setting and the "display over other apps" permission. */
     void refreshIsland() {
@@ -1221,8 +1237,7 @@ public class HermesService extends Service {
             island.destroy();
             island = null;
         }
-        refreshTrigger();
-        pushIsland();
+        postStatus(); // the system chip comes and goes with the app's own island
     }
 
     static void refreshIslandAsync() {

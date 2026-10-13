@@ -41,8 +41,8 @@ final class VoiceController {
     private boolean ttsReady;
     private String pendingSpeech;
     private boolean active;
-    private boolean offline = true;
-    private boolean retried;
+    /** 0: chosen language, offline preferred. 1: same, online. 2: the phone's own language. 3: en-US. */
+    private int attempt = 0;
     private Ui ui;
     private int lastError = -1;
     private final Runnable giveUp = () -> finish(null);
@@ -87,6 +87,9 @@ final class VoiceController {
             case SpeechRecognizer.ERROR_NETWORK_TIMEOUT:
             case SpeechRecognizer.ERROR_SERVER:
                 return "Speech recognition needs internet right now.";
+            case SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED:
+            case SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE:
+                return "Speech recognition has no language pack for that. Download one in Google speech settings.";
             case SpeechRecognizer.ERROR_RECOGNIZER_BUSY:
                 return "Speech recognition is busy. Try again.";
             case SpeechRecognizer.ERROR_AUDIO:
@@ -121,8 +124,7 @@ final class VoiceController {
             return;
         }
         active = true;
-        offline = true;
-        retried = false;
+        attempt = 0;
         buzz();
         ui.transcript("");
         listen();
@@ -153,11 +155,11 @@ final class VoiceController {
 
                 @Override
                 public void onError(int code) {
-                    // No offline pack for this language (or the recogniser dropped): try once more, online.
-                    if (!retried && offline && (code == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED || code == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE
+                    // Language unavailable (13), not supported (12), recogniser dropped (11, 5): walk down the fallbacks
+                    // (online, then the phone's own language, then en-US) before giving up.
+                    if (attempt < 3 && (code == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED || code == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE
                             || code == SpeechRecognizer.ERROR_SERVER_DISCONNECTED || code == SpeechRecognizer.ERROR_CLIENT)) {
-                        retried = true;
-                        offline = false;
+                        attempt++;
                         main.removeCallbacks(giveUp);
                         destroyRecognizer();
                         main.post(VoiceController.this::listen);
@@ -169,12 +171,14 @@ final class VoiceController {
             });
             Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
                     .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    .putExtra(RecognizerIntent.EXTRA_LANGUAGE, svc.getSharedPreferences("hm", Context.MODE_PRIVATE).getString("voice_lang", "en-IN"))
                     .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                    .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, offline)
+                    .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, attempt == 0)
                     .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
                     .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
                     .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+            String lang = svc.getSharedPreferences("hm", Context.MODE_PRIVATE).getString("voice_lang", "en-IN");
+            if (attempt <= 1) i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang);
+            else if (attempt == 3) i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US"); // attempt 2: no language = the phone's
             sr.startListening(i);
             main.postDelayed(giveUp, 12_000);
         } catch (Exception e) {
@@ -206,9 +210,9 @@ final class VoiceController {
             reply = VoiceActions.run(svc, cmd, locked);
             HistoryStore.append(svc, "voice", "", text, cmd.type + ": " + reply);
         }
-        if (ui != null) ui.transcript(text == null ? "" : text);
+        if (ui != null) ui.transcript(text == null || text.trim().isEmpty() ? reply : text + "\n" + reply);
         say(reply);
-        main.postDelayed(this::end, 1800);
+        main.postDelayed(this::end, text == null || text.trim().isEmpty() ? 4500 : 2500);
     }
 
     private void end() {

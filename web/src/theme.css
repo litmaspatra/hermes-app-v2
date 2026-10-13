@@ -116,6 +116,12 @@
   --switch-on: rgba(74, 60, 203, 0.4);
   --mark-bg: rgba(255, 214, 90, 0.7);
   --press: rgba(20, 22, 26, 0.08);
+  --glass-field:
+    radial-gradient(70% 50% at 12% 8%, rgba(176, 150, 255, 0.85), transparent 70%),
+    radial-gradient(60% 45% at 95% 22%, rgba(120, 226, 214, 0.8), transparent 70%),
+    radial-gradient(65% 50% at 78% 98%, rgba(255, 190, 150, 0.8), transparent 70%),
+    radial-gradient(55% 45% at 2% 88%, rgba(255, 170, 215, 0.7), transparent 70%),
+    #e9e4fb;
   --blur: 22px;
   --shadow: 0 10px 30px rgba(70, 58, 140, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.85);
   color-scheme: light;
@@ -129,16 +135,13 @@
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  background:
-    radial-gradient(70% 50% at 12% 8%, rgba(176, 150, 255, 0.85), transparent 70%),
-    radial-gradient(60% 45% at 95% 22%, rgba(120, 226, 214, 0.8), transparent 70%),
-    radial-gradient(65% 50% at 78% 98%, rgba(255, 190, 150, 0.8), transparent 70%),
-    radial-gradient(55% 45% at 2% 88%, rgba(255, 170, 215, 0.7), transparent 70%);
+  background: var(--glass-field);
 }
 :root[data-style='glass'] #root,
 :root[data-style='glass'] .app,
-:root[data-style='glass'] .chat,
-:root[data-style='glass'] .screen { background: transparent; }
+:root[data-style='glass'] .chat { background: transparent; }
+/* full screens (Settings, Skills, ...) sit ABOVE the chat, so they must hide it: paint the same colour field, opaque */
+:root[data-style='glass'] .screen { background: var(--glass-field); background-attachment: fixed; }
 :root[data-style='glass'] .topbar,
 :root[data-style='glass'] .composer-wrap,
 :root[data-style='glass'] .set-card,
@@ -278,5 +281,5 @@
 .pet-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 10px; }
 .pet-card { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 6px; border: 2px solid var(--border); border-radius: 14px; background: var(--surface-2); }
 .pet-card.on { border-color: var(--accent); }
-.pet-emoji { font-size: 1.8rem; line-height: 1; }
-.pet-name { font-size: 0.8rem; font-weight: 600; }
+.pet-name { font-size: 0.95rem; font-weight: 700; }
+.pet-sub { font-size: 0.72rem; color: var(--dim); text-align: center; }

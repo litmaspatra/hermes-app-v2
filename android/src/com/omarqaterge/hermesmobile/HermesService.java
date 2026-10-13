@@ -112,6 +112,10 @@ public class HermesService extends Service {
         new Thread(this::serve, "hermes-events").start();
         rearmWake();
         main.post(this::refreshIsland);
+        if (listenPending) {
+            listenPending = false;
+            main.postDelayed(this::startListening, 600); // after the island has been created
+        }
     }
 
     @Override
@@ -558,6 +562,7 @@ public class HermesService extends Service {
             }
             promote(b, petChip());
         }
+        b.setLargeIcon(petIcon());
         return b.build();
     }
 
@@ -566,7 +571,7 @@ public class HermesService extends Service {
 
     /** True when the app's own floating island is on screen duty: then the system's island (Live Update chip) stays off. */
     boolean systemChipWanted() {
-        return island == null || getSharedPreferences("hm", MODE_PRIVATE).getBoolean("system_chip", false);
+        return island == null || getSharedPreferences("hm", MODE_PRIVATE).getBoolean("system_chip", true);
     }
 
     void promote(Notification.Builder b, String chip) {
@@ -652,6 +657,7 @@ public class HermesService extends Service {
             }
         }
         promote(b, petChip());
+        b.setLargeIcon(petIcon());
         return b.build();
     }
 
@@ -727,6 +733,7 @@ public class HermesService extends Service {
             b.addAction(new Notification.Action.Builder(null, colored("Allow session", GOLD), approveIntent(a, "session")).build());
         b.addAction(new Notification.Action.Builder(null, colored("✕ Deny", RED), approveIntent(a, "deny")).build());
         promote(b, secs > 0 ? petEmoji() + " " + secs + "s" : petEmoji() + "❗");
+        b.setLargeIcon(petIcon());
         return b.build();
     }
 
@@ -780,6 +787,7 @@ public class HermesService extends Service {
             b.addExtras(extras);
             if (Build.VERSION.SDK_INT >= 36) b.setShortCriticalText(flashChip == null ? petEmoji() + "✨" : flashChip.replace("✅", petEmoji()));
         }
+        b.setLargeIcon(petIcon());
         return b.build();
     }
 
@@ -1113,21 +1121,34 @@ public class HermesService extends Service {
         return IslandOverlay.Mood.SLEEP;
     }
 
-    /** The chosen pet's face, for the system chip. */
+    private final java.util.HashMap<String, android.graphics.drawable.Icon> petIcons = new java.util.HashMap<>();
+
+    /** The pet's face for the current mood, shown as the notification's large picture (the system island can't animate, but it can show this). */
+    synchronized android.graphics.drawable.Icon petIcon() {
+        String sp = getSharedPreferences("hm", MODE_PRIVATE).getString("pet", "blob");
+        IslandOverlay.Mood m = mood();
+        String key = sp + "|" + m;
+        android.graphics.drawable.Icon ic = petIcons.get(key);
+        if (ic == null) {
+            try {
+                ic = android.graphics.drawable.Icon.createWithBitmap(PetView.snapshot(this, sp, m, 160));
+                petIcons.put(key, ic);
+            } catch (Throwable t) {
+                return null; // never let a drawing problem stop a notification
+            }
+        }
+        return ic;
+    }
+
+    /** A symbol for the chosen pet on the system chip (the chip can only show text). */
     String petEmoji() {
-        switch (getSharedPreferences("hm", MODE_PRIVATE).getString("pet", "cat")) {
-            case "dog":
-                return "🐶";
-            case "fox":
-                return "🦊";
-            case "panda":
-                return "🐼";
-            case "bunny":
-                return "🐰";
-            case "robot":
-                return "🤖";
-            default:
+        switch (getSharedPreferences("hm", MODE_PRIVATE).getString("pet", "blob")) {
+            case "mika":
+                return "🌸";
+            case "cat":
                 return "🐱";
+            default:
+                return "🫧";
         }
     }
 
@@ -1213,9 +1234,13 @@ public class HermesService extends Service {
         if (voiceCtl != null && voiceCtl.isActive()) voiceCtl.cancel();
     }
 
+    /** Set when a trigger fires before the service object exists (the tile starts the service and asks at once). */
+    static volatile boolean listenPending = false;
+
     static void listenAsync() {
         HermesService s = instance;
         if (s != null) s.main.post(s::startListening);
+        else listenPending = true; // onCreate picks it up
     }
 
     /** A voice command needs a permission: ask for it once through the app (only used when the phone is unlocked). */

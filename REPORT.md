@@ -1,47 +1,40 @@
 # Hermes Mobile v2: report
 
-Nothing here was run on a phone, and the full APK build (aapt2/d8/apksigner) could not run in my sandbox (no access to
-Google's SDK servers). What WAS verified: Java compiles against android-36.jar (`tools/java-check.sh`), 134 pure-Java
-unit cases pass (`tools/java-unit-tests.sh`), 88 web tests pass (`npm test`), TypeScript type-checks, `vite build`
-succeeds, and the three styles were rendered in a headless browser. The real APK build happens in GitHub Actions
-(`.github/workflows/android-apk.yml`).
+Not run on a phone, and the full APK build (aapt2/d8/apksigner) can't run in my sandbox. Verified here: Java compiles against
+android-36.jar with all lint warnings on (none in our code), 134 pure-Java test cases, 88 web tests, TypeScript, `vite build`,
+and every Settings page opened and closed in a headless browser in all three styles with a fake phone bridge.
+The real APK build happens in GitHub Actions (`.github/workflows/android-apk.yml`).
 
-## v2.1 fixes (after the first install)
-- Two islands: the system island (the Live Update chip) covered the app's island. The chip is now off while the app's island is on; the setting "Also show in the system island" brings it back and moves the app's island below the status bar.
-- Corner swipe said "I didn't catch that" at once: once Hermes is the digital assistant, Android makes `HermesRecognitionService` the phone's default speech recogniser, and that was a stub that returned an error. It now forwards to the real recogniser (Google's, or the first other one), and the listener asks for that recogniser directly. If the offline pack is missing it retries online. Errors now say what went wrong (microphone, internet, busy) instead of always "I didn't catch that", and the error code is written to History.
-- More pets: cat, dog, fox, panda, bunny, robot (Settings → Island → Pet). The system chip uses the pet's emoji.
-- Triple tap removed. New trigger: tap and hold on the LOCK SCREEN only (hold near the top centre; 400/600/900 ms). It is inactive while the phone is unlocked, so typing cannot trigger it. Android may hide overlays on the lock screen: if holding there does nothing on your phone, tell me.
-- Glassmorphism redone: one fixed colour backdrop (the old version painted the gradient on several layers and left visible seams), frosted panels with a light edge, gradient accent buttons. Neo-brutalism: deeper pink accent so accent-coloured text is readable, hard shadows on the suggestion cards.
+## v2.2 (this round)
+- **Glass Settings screens were see-through** (the chat showed through behind them). My CSS had made every full screen transparent. Fixed: full screens paint the same colour field, opaque.
+- **Corner swipe: "Speech recognition failed (code 13)".** 13 = language unavailable. The listener now falls back step by step: your language offline, then online, then the phone's own language, then en-US. The corner swipe now listens on the floating pet (the assistant window stays alive but invisible so Android keeps giving it the microphone). Errors are shown on screen for a few seconds and written to History with their code.
+- **System island vs floating pet.** Status and approvals now use the system island (Live Update chip and the notification's Allow/Deny buttons), switched on by default. The floating pet sits just BELOW the status bar, so nothing covers it or the drag-and-drop target. Android doesn't let any app receive a drop on the system island, so the drop target has to be the pet. Setting "Approval buttons on the floating pet" is off by default. The notification also carries a picture of the pet in its current mood.
+- **Pets redone**: Blob (mint slime), Mika (an original chibi girl: lavender hair, star clip, teal eyes) and Cat. Expressions ease smoothly (eyes, brows, mouth, blush, arms, bounce, tilt) for sleeping, thinking, typing, startled approvals, curiosity, cheering, worry, listening. I did NOT draw Chika Fujiwara: she is a copyrighted character. Mika is original. These are drawn in code, untested on a screen; tell me what to change.
+- **Removed: lock-screen tap-and-hold.** It could never work on stock Android (apps can't show or touch anything on the lock screen), so it was a function that did nothing. Triggers are now the corner swipe and the Quick Settings tile.
+- **Quick Settings tile** did nothing the first time (it asked for listening before the service existed). Fixed, and it asks to unlock first on a locked phone.
+- **Settings → Island** and **Voice commands** pages rewritten for the above.
 
-## Done, per phase
-- P0 build/CI: `build.sh` creates the keystore folder, accepts ANDROID_SDK_ROOT, no hard-coded Homebrew JAVA_HOME; new workflow `.github/workflows/android-apk.yml`.
-- P1 approvals: queue instead of one slot, always remembered (even with the app open), persistent notifications that `onResume` no longer cancels, per-approval PendingIntent codes, "timed out" notice, retry, no removal at countdown 0 (stale guard 5 min), keep-alive that stops Chromium freezing the page (and its WebSocket) while Hermes works or waits.
-- P2 island: native overlay with the pet (9 moods, 6 species), on-demand visibility (invisible drop strip when idle), approval buttons, drag-and-drop with prompt box and chips, background send through `window.hermesIsland`.
-- P3 voice: `VoiceCommands` grammar (calls, messages only on the explicit phrase, music, timer/alarm, torch, volume, time, navigation; camera/reading blocked), `VoiceActions`, `VoiceController`, triggers: assistant corner-swipe panel, Quick Settings tile, lock-screen tap-and-hold.
-- P4 safe approvals: `ApprovalPolicy` (strict read-only allowlist, editable), History (500 entries, on device), risk chip in the app sheet, notification and island.
-- P5 themes: Material 3 (default; light/dark/OLED/system + Material You), Neo-brutalism and Glass (light only), "Reduce effects", island frame follows the style; contrast test.
-- Settings pages: Appearance (style), Island (pet, visibility, system island), Voice commands, Approvals (toggle, allowlist editor, test box, history).
+## Audit: what was checked, what was found
+Checked by script and by running the UI (not a line-by-line read of the ~25,000 lines):
+- Bridge contract: every Java `@JavascriptInterface` method vs the web whitelist and the web's calls; every `window.hermes*` hook Java calls vs the page: all consistent.
+- Java methods never referenced: none. javac `-Xlint:all`: no warnings in our sources. TypeScript unused locals: a few leftovers in untouched original files (Bots.tsx, Sheets.tsx), harmless; my own leftover removed.
+- All 16 Settings rows × 3 styles: every page opens, back returns to Settings, no script errors.
+- Found and fixed: transparent glass screens, dead lock-screen hold, tile race, native `reduce_effects` setting that was saved but never read, speech recogniser stub that broke the phone's default recogniser.
+- Not covered: anything that needs a real phone (drag from another app, assist gesture, microphone from the background, notification actions).
 
-## Deviations and simplifications
-- Several numbers for one contact: if exactly one is a mobile it is used; otherwise unlocked says so and does nothing, locked says "Unlock to choose". No "ask which" dialog.
-- The foreground service is `specialUse`; Android 14+ may refuse background microphone use for the tile and lock-screen triggers. The corner-swipe assistant path is the one Android clearly allows. Untested.
-- The compact assistant panel depends on how Funtouch OS draws assistant windows; on failure it falls back to opening the app in Live mode (the old behaviour).
-- Lock-screen hold: the island window asks Android to show over the lock screen (FLAG_SHOW_WHEN_LOCKED); phones that hide overlays there will not respond. A hold in the invisible zone is consumed, so a short tap there does nothing.
-- Dragging from another app needs that app to start a system-level drag. The island needs the app's activity alive to take the grant; otherwise it tries a direct read and says "Couldn't read that" if refused.
-- Auto-approved commands that the plugin later reports as answered are matched by session, not request id (the plugin's `clear` event has no id).
-- `git diff`/`log` can run textconv drivers configured in a repo; only `--ext-diff` and `--textconv` are blocked.
-- Messages while locked are OFF by default; calls while locked are ON.
-- Answers given in the app's own sheet are logged as "answered in the app" (the choice is not visible to the shell).
-- After installing, re-select Hermes under Settings → Default apps → Digital assistant.
-- Signing: an APK signed with a new key cannot update an install signed with another key. Add repo secret `KEYSTORE_B64` (your old key, alias `hermes`, password `hermesmobile`) or uninstall first.
+## Earlier work (unchanged)
+Approvals queue and keep-alive, read-only auto-approve with editable allowlist and History, risk chips, voice commands (calls, explicit messages, music, timer/alarm, torch, volume, time, navigation), three styles (Material 3 default with dark mode and Material You; Neo-brutalism and Glass light only), `build.sh` fixes and the CI workflow.
 
-## Device test checklist
-- [ ] Approval stays visible until answered or timed out (20 background trials); two approvals in one chat answer the right request.
-- [ ] A 30-minute background run keeps the socket alive while a job works.
-- [ ] Only one island is visible; the pet you picked animates.
-- [ ] Drag an image from the gallery onto the island, type a request, get a reply notification with the app in the background.
-- [ ] Tap and hold near the top centre of the lock screen shows the island and listens; it does nothing while unlocked or typing.
-- [ ] Corner swipe shows the compact panel, listens, and runs "what time is it".
-- [ ] "call <exact name>" places the call at once, unlocked and locked.
-- [ ] Auto-approve answers `ls` and asks for `rm`.
-- [ ] Each style renders every screen readably; Material follows dark mode.
+## Known limits
+- Corner swipe needs Hermes chosen as the digital assistant (Settings → Default apps → Digital assistant). With the screen fully off or locked, apps can't read touches or buttons, so only the corner swipe (where your phone allows assistants on the lock screen) and the tile exist.
+- Android 14+ may still limit background microphone use; the corner-swipe path is the one Android clearly allows.
+- Several numbers for one contact: the mobile one is used if there's exactly one, otherwise it says so and does nothing.
+- Signing: an APK signed with a new key can't update an install signed with another key. Add repo secret `KEYSTORE_B64` (old key, alias `hermes`, password `hermesmobile`) or uninstall first.
+
+## Device checklist
+- [ ] One island at the top (system), the pet just below it; drag an image from the gallery onto the pet and send a request.
+- [ ] Approval: Allow/Deny buttons appear in the system island/notification and stay until answered.
+- [ ] Corner swipe: the pet listens, "what time is it" answers; a failure shows its reason on screen.
+- [ ] Quick Settings "Hermes listen" tile starts listening.
+- [ ] Each pet (Blob, Mika, Cat) looks right in sleeping, working, approval, listening.
+- [ ] Glass, Neo-brutalism and Material look right on Settings and chat.

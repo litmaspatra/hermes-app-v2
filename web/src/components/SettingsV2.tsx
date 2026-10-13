@@ -108,12 +108,9 @@ export function StyleSection() {
 // ── Island ──────────────────────────────────────────────────
 
 const PETS = [
-  { id: 'cat', label: 'Cat', emoji: '🐱' },
-  { id: 'dog', label: 'Dog', emoji: '🐶' },
-  { id: 'fox', label: 'Fox', emoji: '🦊' },
-  { id: 'panda', label: 'Panda', emoji: '🐼' },
-  { id: 'bunny', label: 'Bunny', emoji: '🐰' },
-  { id: 'robot', label: 'Robot', emoji: '🤖' }
+  { id: 'blob', label: 'Blob', sub: 'Bouncy mint slime' },
+  { id: 'mika', label: 'Mika', sub: 'Chibi girl, lavender hair' },
+  { id: 'cat', label: 'Cat', sub: 'Tail-wagging tabby' }
 ]
 
 export function IslandPage() {
@@ -121,18 +118,18 @@ export function IslandPage() {
   if (!hasNativeV2() || !s) return <NoPhone />
   return (
     <>
-      <Section footer="A small cat that shows what Hermes is doing, keeps approvals on screen until you answer them, and takes files you drag onto it. It needs “Display over other apps”.">
-        <ToggleRow icon="🐱" tone="gold" title="Floating island" on={s.island} onChange={v => set('island', v)} />
+      <Section footer="An animated pet that sits just under the system island and shows what Hermes is doing, shows voice listening, and takes files you drag onto it. It needs “Display over other apps”.">
+        <ToggleRow icon="🫧" tone="gold" title="Floating pet" on={s.island} onChange={v => set('island', v)} />
         {s.island && !s.overlay && <Row icon="⚠️" tone="red" title="Allow display over other apps" sub="Needed for the island" chevron onClick={() => openOverlaySettings()} />}
       </Section>
       {s.island && (
         <>
-          <Section title="Pet" footer="Your pet reacts to what Hermes is doing: sleeping, thinking, working, asking, happy, worried. It looks the same in every theme.">
+          <Section title="Pet" footer="Your pet acts out what Hermes is doing: dozing, thinking, typing, startled by an approval, curious, cheering, worried. It looks the same in every theme.">
             <div className="pet-grid">
               {PETS.map(p => (
                 <button key={p.id} className={`pet-card${s.pet === p.id ? ' on' : ''}`} onClick={() => { haptic(); set('pet', p.id) }}>
-                  <span className="pet-emoji">{p.emoji}</span>
                   <span className="pet-name">{p.label}</span>
+                  <span className="pet-sub">{p.sub}</span>
                 </button>
               ))}
             </div>
@@ -144,10 +141,11 @@ export function IslandPage() {
               onChange={v => set('island_mode', v)}
             />
           </Section>
-          <Section footer="The system's own island (the Live Update chip) would sit on top of this one, so it is turned off while the floating island is on. Turn this on to have both; the floating one then moves below the status bar.">
-            <ToggleRow icon="🏝" tone="gray" title="Also show in the system island" on={s.system_chip} onChange={v => set('system_chip', v)} />
+          <Section footer="Status and approvals use the system island (the Live Update chip and its notification buttons). The floating pet sits below it so nothing is covered. Turn this off to hide the system island and keep only the floating pet at the very top.">
+            <ToggleRow icon="🏝" tone="gray" title="Use the system island" on={s.system_chip} onChange={v => set('system_chip', v)} />
+            <ToggleRow icon="🛡" tone="green" title="Approval buttons on the floating pet" on={s.island_approvals} onChange={v => set('island_approvals', v)} />
           </Section>
-          <Section title="Drag and drop" footer="Drag an image, file, text or link from another app (gallery, browser, files) onto the island, type what Hermes should do, and it runs in the background. The other app must support dragging out; if not, use Share → Hermes.">
+          <Section title="Drag and drop" footer="Drag an image, file, text or link from another app (gallery, browser, files) onto the floating pet. Android doesn't let apps receive drops on the system island itself, so the drop target is the pet, which appears under the system island while you drag. Type what Hermes should do and it runs in the background. The other app must support dragging out; if not, use Share → Hermes.">
             <Row icon="🖼" tone="blue" title="Drop to ask" sub="No setting needed" />
           </Section>
         </>
@@ -168,18 +166,8 @@ export function VoiceCommandsPage() {
       </Section>
       {s.voice_enabled && (
         <>
-          <Section title="Triggers" footer="Corner swipe: choose Hermes as the phone’s digital assistant, then swipe in from a corner; a small panel listens without opening the app. Quick Settings: add the “Hermes listen” tile. Lock screen: tap and hold near the top centre of the lock screen (it only works there, so typing never triggers it, and it needs the island permission). With the screen fully off, no trigger is possible.">
-            <Row icon="↗️" tone="gold" title="Corner swipe assistant" value={s.assistant ? 'On' : 'Off'} sub="Opens a small listening panel" chevron onClick={() => (window.HermesAndroid as unknown as { openAssistantSettings?: () => void } | undefined)?.openAssistantSettings?.()} />
-            <ToggleRow icon="👆" tone="purple" title="Hold on the lock screen" on={s.hold_listen} onChange={v => set('hold_listen', v)} />
-            {s.hold_listen && (
-              <div className="pad">
-                <Segmented
-                  options={[{ value: 400, label: 'Quick' }, { value: 600, label: 'Normal' }, { value: 900, label: 'Long' }]}
-                  value={s.hold_ms <= 500 ? 400 : s.hold_ms <= 750 ? 600 : 900}
-                  onChange={v => set('hold_ms', v)}
-                />
-              </div>
-            )}
+          <Section title="Triggers" footer="Corner swipe: choose Hermes as the phone’s digital assistant, then swipe in from a corner; the floating pet listens (it also works from the lock screen if your phone allows assistants there). Quick Settings: add the “Hermes listen” tile. Apps can’t read touches or buttons while the screen is off or locked, so those are the two triggers.">
+            <Row icon="↗️" tone="gold" title="Corner swipe assistant" value={s.assistant ? 'On' : 'Off'} sub="Choose Hermes as the digital assistant" chevron onClick={() => (window.HermesAndroid as unknown as { openAssistantSettings?: () => void } | undefined)?.openAssistantSettings?.()} />
           </Section>
           <Section title="While the phone is locked" footer="Calls place at once when the name matches exactly one contact. Messages are only sent when you say “send a message to NAME saying …”. Nothing private is read aloud while locked.">
             <ToggleRow icon="📞" tone="green" title="Allow calls" on={s.voice_calls_locked} onChange={v => set('voice_calls_locked', v)} />
@@ -207,7 +195,7 @@ const split = (v: string) => v.split(/[\s,]+/).map(x => x.trim()).filter(Boolean
 
 export function ApprovalsPage() {
   const [s, set] = useNative()
-  const [st, setSt] = useState<ApprovalState | null>(() => approvalState())
+  const [st] = useState<ApprovalState | null>(() => approvalState())
   const [rules, setRules] = useState<AllowRule[]>(() => st?.rules ?? [])
   const [prog, setProg] = useState('')
   const [subs, setSubs] = useState('')

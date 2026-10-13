@@ -1185,7 +1185,7 @@ public class MainActivity extends Activity {
         }
 
         // ── v2: island, voice, approvals, themes (Settings screens in the page talk to these) ──
-        private final String[] BOOL_PREFS = {"island", "auto_readonly", "voice_enabled", "voice_calls_locked", "voice_msgs_locked", "hold_listen", "system_chip", "reduce_effects"};
+        private final String[] BOOL_PREFS = {"island", "auto_readonly", "voice_enabled", "voice_calls_locked", "voice_msgs_locked", "island_approvals", "system_chip", "reduce_effects"};
         private final String[] STR_PREFS = {"island_mode", "theme", "voice_lang", "pet"};
 
         /** All native settings as JSON, with their defaults. */
@@ -1205,10 +1205,9 @@ public class MainActivity extends Activity {
                         .put("voice_calls_locked", sp.getBoolean("voice_calls_locked", true))
                         .put("voice_msgs_locked", sp.getBoolean("voice_msgs_locked", false))
                         .put("voice_lang", sp.getString("voice_lang", "en-IN"))
-                        .put("hold_listen", sp.getBoolean("hold_listen", true))
-                        .put("hold_ms", sp.getInt("hold_ms", 600))
-                        .put("pet", sp.getString("pet", "cat"))
-                        .put("system_chip", sp.getBoolean("system_chip", false))
+                        .put("island_approvals", sp.getBoolean("island_approvals", false))
+                        .put("pet", sp.getString("pet", "blob"))
+                        .put("system_chip", sp.getBoolean("system_chip", true))
                         .put("assistant", isAssistant(key)).toString();
             } catch (Exception e) {
                 return "{}";
@@ -1229,14 +1228,9 @@ public class MainActivity extends Activity {
                 ed.putString(name, value);
                 known = true;
             }
-            if ("hold_ms".equals(name) && value.matches("\\d{3,4}")) {
-                ed.putInt(name, Math.max(400, Math.min(1200, Integer.parseInt(value))));
-                known = true;
-            }
             if (!known) return;
             ed.apply();
             if ("island".equals(name) && "true".equals(value) && !android.provider.Settings.canDrawOverlays(MainActivity.this)) runOnUiThread(MainActivity.this::openOverlaySettings);
-            if ("hold_listen".equals(name) && "true".equals(value) && !android.provider.Settings.canDrawOverlays(MainActivity.this)) runOnUiThread(MainActivity.this::openOverlaySettings);
             HermesService.refreshIslandAsync();
         }
 

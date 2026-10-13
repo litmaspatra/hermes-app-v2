@@ -16,6 +16,12 @@ public class ListenTileService extends TileService {
 
     @Override
     public void onClick() {
+        // On a locked phone Android asks for the unlock first; listening starts after it.
+        if (isLocked()) unlockAndRun(this::fire);
+        else fire();
+    }
+
+    private void fire() {
         HermesService.start(this);
         HermesService.listenAsync();
     }

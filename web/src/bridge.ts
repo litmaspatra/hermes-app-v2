@@ -266,8 +266,7 @@ export interface NativeSettings {
   voice_calls_locked: boolean
   voice_msgs_locked: boolean
   voice_lang: string
-  hold_listen: boolean
-  hold_ms: number
+  island_approvals: boolean
   pet: string
   system_chip: boolean
   assistant: boolean

@@ -5,7 +5,7 @@ import { api } from './api'
 import { forgetCheckpoints } from './checkpoints'
 import { cachedChat, forgetChat, rememberChat, saveChatToDisk } from './chatcache'
 import { canvasCallStarted, canvasToolDone, canvasWritingDone, canvasWritingStarted } from './canvas'
-import { applyDraftRead, autoReadFor, liveBridge, setDraftRead, speak } from './voice'
+import { applyDraftRead, autoReadFor, liveBridge, setDraftRead, speak, voiceAskBridge } from './voice'
 import { JsonRpcGatewayClient, type GatewayEvent } from '@hermes/shared/json-rpc-gateway'
 import type { ServerRequest } from '@hermes/shared/json-rpc-channel'
 import type {
@@ -23,7 +23,7 @@ import type {
   TranscriptMessage,
   Usage
 } from '@hermes/shared/gateway-contract.generated'
-import { appInBackground, cancelNotification, notify, setLastChat, startHermes, wsUrl } from './bridge'
+import { appInBackground, approvalAnswered, cancelNotification, notify, setLastChat, startHermes, wsUrl } from './bridge'
 import {
   type ActiveSession,
   type Attachment,
@@ -868,6 +868,11 @@ client.onRequest((req: ServerRequest) => {
 
 export function answerRequest(req: ServerRequest, result: Record<string, unknown>): void {
   req.respond(result)
+  if (req.method === 'approval') {
+    // Tell the phone side now, so the island and notifications stop asking about it when the app goes to the background.
+    const p = req.params as Record<string, unknown>
+    approvalAnswered(String(p.request_id || ''), String(p.session_id || ''))
+  }
   cancelNotification(`req-${req.id}`)
   setState(s => ({ requests: s.requests.filter(r => r.id !== req.id) }))
 }
@@ -1140,6 +1145,11 @@ client.onEvent((ev: GatewayEvent) => {
         // Live mode reads every reply itself, then goes back to listening.
         const it = getState().active?.items.find(x => x.id === lastId)
         liveBridge.onReply(p.error || p.failure_reason ? '' : it && it.kind === 'assistant' ? it.text : typeof p.text === 'string' ? p.text : '')
+      }
+      if (voiceAskBridge.pending) {
+        voiceAskBridge.pending = false
+        const it = getState().active?.items.find(x => x.id === lastId)
+        voiceAskBridge.onReply(p.error || p.failure_reason ? '' : it && it.kind === 'assistant' ? it.text : typeof p.text === 'string' ? p.text : '')
       }
       if (!liveBridge.active && !p.error && !p.failure_reason && autoReadFor(getState().active?.storedId) && !appInBackground()) {
         const it = getState().active?.items.find(x => x.id === lastId)

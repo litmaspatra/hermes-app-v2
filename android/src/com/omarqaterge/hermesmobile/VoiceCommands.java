@@ -116,4 +116,46 @@ final class VoiceCommands {
         }
         return c(Type.UNKNOWN);
     }
+
+    // ── conversation helpers (the controller keeps listening only when asked to, or after a Hermes answer) ──
+
+    private static final Pattern CONVO_START = Pattern.compile("^(?:hey\\s+hermes[,\\s]+)?(?:let'?s\\s+(?:talk|chat|have\\s+a\\s+(?:chat|conversation|talk))|talk\\s+to\\s+me|chat\\s+with\\s+me|conversation\\s+mode|start\\s+(?:a\\s+)?conversation|baat\\s+karte\\s+hain|baat\\s+karo|mujhse\\s+baat\\s+karo|chat\\s+karte\\s+hain)$", F);
+    private static final Pattern CONVO_END = Pattern.compile("^(?:ok(?:ay)?[,\\s]+)?(?:stop|that'?s\\s+all|that\\s+is\\s+all|bye|goodbye|good\\s+bye|end\\s+(?:the\\s+)?conversation|stop\\s+(?:talking|listening)|thanks?(?:\\s+you)?|thank\\s+you|bas|bas\\s+itna|band\\s+karo|ruko|chup|alvida)$", F);
+    private static final Pattern YES = Pattern.compile("^(?:yes|yeah|yep|yup|sure|ok|okay|correct|right|do\\s+it|go\\s+ahead|haan|haa|han|ha|ji|ji\\s+haan|theek\\s+hai|kar\\s+do|karo)$", F);
+    private static final Pattern NO = Pattern.compile("^(?:no|nope|nah|cancel|don'?t|stop|nahi|nahin|na|mat\\s+karo|rehne\\s+do)$", F);
+
+    static boolean isConversationStart(String utterance) {
+        return CONVO_START.matcher(clean(utterance)).matches();
+    }
+
+    static boolean isConversationEnd(String utterance) {
+        return CONVO_END.matcher(clean(utterance)).matches();
+    }
+
+    /** 1 = yes, -1 = no, 0 = something else. */
+    static int yesNo(String utterance) {
+        String u = clean(utterance);
+        if (YES.matcher(u).matches()) return 1;
+        if (NO.matcher(u).matches()) return -1;
+        return 0;
+    }
+
+    /**
+     * A Hermes reply made fit to be read aloud: no code blocks, links, markdown marks or bullets, and short (a spoken
+     * answer is not a document; the full reply is in the chat).
+     */
+    static String speakable(String reply) {
+        if (reply == null) return "";
+        String t = reply.replaceAll("(?s)```.*?```", " (code is in the chat) ");
+        t = t.replaceAll("!\\[[^\\]]*\\]\\([^)]*\\)", " ");              // images
+        t = t.replaceAll("\\[([^\\]]+)\\]\\([^)]*\\)", "$1");              // links keep their text
+        t = t.replaceAll("https?://\\S+", " link ");
+        t = t.replaceAll("(?m)^\\s{0,3}#{1,6}\\s*", "");                    // headings
+        t = t.replaceAll("(?m)^\\s*(?:[-*•]|\\d+[.)])\\s+", "");              // bullets and numbers
+        t = t.replaceAll("[*_`~>|]+", "");
+        t = t.replaceAll("\\s+", " ").trim();
+        if (t.length() <= 600) return t;
+        int cut = Math.max(t.lastIndexOf(". ", 600), Math.max(t.lastIndexOf("? ", 600), t.lastIndexOf("! ", 600)));
+        return (cut > 200 ? t.substring(0, cut + 1) : t.substring(0, 600)) + " The rest is in the chat.";
+    }
 }

@@ -128,6 +128,7 @@ public class MainActivity extends Activity {
                 deliverShare();
                 deliverShortcut();
                 deliverQueuedIsland();
+                deliverQueuedVoice();
             }
 
             @Override
@@ -352,6 +353,7 @@ public class MainActivity extends Activity {
         if (intent.getBooleanExtra("island", false)) {
             islandBackground = true;
             deliverQueuedIsland();
+            deliverQueuedVoice();
         }
         askPerm(intent);
         String sc = shortcutOf(intent);
@@ -618,6 +620,42 @@ public class MainActivity extends Activity {
         sharedType = null;
         holdPage(90_000);
         String js = "window.hermesIsland ? window.hermesIsland(" + files.size() + "," + JSONObject.quote(text) + ") : 'n'";
+        web.evaluateJavascript(js, v -> done.accept("\"y\"".equals(v)));
+    }
+
+    // ── a spoken question: the page sends it and reports Hermes's final reply (window.hermesVoiceAsk) ──
+    private static volatile Object[] queuedVoice; // {String text, Boolean fresh}
+
+    static void queueVoice(String text, boolean fresh) {
+        queuedVoice = new Object[] {text, fresh};
+    }
+
+    static void clearQueuedVoice() {
+        queuedVoice = null;
+    }
+
+    void deliverQueuedVoice() {
+        Object[] q = queuedVoice;
+        if (q == null || !pageReady) return;
+        queuedVoice = null;
+        final boolean back = islandBackground;
+        islandBackground = false;
+        deliverVoiceAsk((String) q[0], (Boolean) q[1], ok -> {
+            if (!ok) {
+                HermesService s = HermesService.instance;
+                if (s != null) s.finishVoiceAsk(null);
+            }
+            if (back) handler.postDelayed(() -> moveTaskToBack(true), 1500);
+        });
+    }
+
+    void deliverVoiceAsk(String text, boolean fresh, java.util.function.Consumer<Boolean> done) {
+        if (!pageReady) {
+            done.accept(false);
+            return;
+        }
+        holdPage(190_000);
+        String js = "window.hermesVoiceAsk ? window.hermesVoiceAsk(" + JSONObject.quote(text) + "," + fresh + ") : 'n'";
         web.evaluateJavascript(js, v -> done.accept("\"y\"".equals(v)));
     }
 
@@ -1185,8 +1223,8 @@ public class MainActivity extends Activity {
         }
 
         // ── v2: island, voice, approvals, themes (Settings screens in the page talk to these) ──
-        private final String[] BOOL_PREFS = {"island", "auto_readonly", "voice_enabled", "voice_calls_locked", "voice_msgs_locked", "island_approvals", "system_chip", "reduce_effects"};
-        private final String[] STR_PREFS = {"island_mode", "theme", "voice_lang", "pet"};
+        private final String[] BOOL_PREFS = {"island", "auto_readonly", "voice_enabled", "voice_calls_locked", "voice_msgs_locked", "island_approvals", "system_chip", "reduce_effects", "voice_fastbrain", "voice_hermes", "voice_follow", "pet_snap"};
+        private final String[] STR_PREFS = {"island_mode", "theme", "voice_lang", "pet", "pet_pos"};
 
         /** All native settings as JSON, with their defaults. */
         @JavascriptInterface
@@ -1205,13 +1243,44 @@ public class MainActivity extends Activity {
                         .put("voice_calls_locked", sp.getBoolean("voice_calls_locked", true))
                         .put("voice_msgs_locked", sp.getBoolean("voice_msgs_locked", false))
                         .put("voice_lang", sp.getString("voice_lang", "en-IN"))
-                        .put("island_approvals", sp.getBoolean("island_approvals", false))
+                        .put("island_approvals", sp.getBoolean("island_approvals", true))
                         .put("pet", sp.getString("pet", "blob"))
-                        .put("system_chip", sp.getBoolean("system_chip", true))
+                        .put("pet_pos", sp.getString("pet_pos", "wander"))
+                        .put("system_chip", sp.getBoolean("system_chip", false))
+                        .put("voice_fastbrain", sp.getBoolean("voice_fastbrain", true))
+                        .put("voice_hermes", sp.getBoolean("voice_hermes", true))
+                        .put("voice_follow", sp.getBoolean("voice_follow", true))
+                        .put("pet_snap", sp.getBoolean("pet_snap", false))
                         .put("assistant", isAssistant(key)).toString();
             } catch (Exception e) {
                 return "{}";
             }
+        }
+
+        /** The in-app sheet answered an approval: the service must stop asking about it (no second notification). */
+        @JavascriptInterface
+        public void approvalAnswered(String key, String requestId, String session) {
+            if (!ok(key)) return;
+            HermesService.approvalAnswered(requestId == null ? "" : requestId, session == null ? "" : session);
+        }
+
+        /** The page reports the final reply to a spoken question (window.hermesVoiceAsk). Empty text = it failed. */
+        @JavascriptInterface
+        public void voiceReply(String key, String text) {
+            if (!ok(key)) return;
+            HermesService.voiceReplyAsync(text == null || text.length() > 100_000 ? "" : text);
+        }
+
+        /** "name = Contact" per line: your own names for people, used by voice calls and messages. */
+        @JavascriptInterface
+        public String voiceAliases(String key) {
+            return ok(key) ? VoiceAliases.text(MainActivity.this) : "";
+        }
+
+        /** Saves that list. Returns "" or what is wrong with it. */
+        @JavascriptInterface
+        public String saveVoiceAliases(String key, String text) {
+            return ok(key) ? VoiceAliases.saveText(MainActivity.this, text) : "not allowed";
         }
 
         /** Sets one native setting; unknown names are ignored. Value is "true"/"false", a number, or text. */

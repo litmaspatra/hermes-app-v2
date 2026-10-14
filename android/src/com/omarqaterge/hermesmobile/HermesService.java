@@ -534,7 +534,7 @@ public class HermesService extends Service {
     Notification statusNotification(String text, String sub, boolean working) {
         boolean flash = flashUntil > System.currentTimeMillis();
         if (flash && approvals.isEmpty() && pendingAsk == null) return flashNotification();
-        if (!approvals.isEmpty()) return approvalNotification(sub);
+        if (!approvals.isEmpty() && approvalNotifyNeeded()) return approvalNotification(sub);
         if (pendingAsk != null) return askNotification(sub);
         // Idle = a slim green card on its own channel (so it can be minimised on its own); working = the gold Live Update.
         Notification.Builder b = new Notification.Builder(this, working ? CH_STATUS : CH_IDLE)
@@ -571,7 +571,15 @@ public class HermesService extends Service {
 
     /** True when the app's own floating island is on screen duty: then the system's island (Live Update chip) stays off. */
     boolean systemChipWanted() {
-        return island == null || getSharedPreferences("hm", MODE_PRIVATE).getBoolean("system_chip", true);
+        return island == null || getSharedPreferences("hm", MODE_PRIVATE).getBoolean("system_chip", false);
+    }
+
+    /**
+     * Approvals are asked ONCE: on the app's island (buttons, text) when it can show them, in the notification only
+     * when it can't (no island, buttons off, or the phone is locked and an overlay can't be seen).
+     */
+    boolean approvalNotifyNeeded() {
+        return island == null || !getSharedPreferences("hm", MODE_PRIVATE).getBoolean("island_approvals", true) || VoiceActions.locked(this);
     }
 
     void promote(Notification.Builder b, String chip) {
@@ -758,7 +766,7 @@ public class HermesService extends Service {
             JSONObject a = approvals.get(0);
             long sec = (now - a.optLong("_at", now)) / 1000;
             int ra = a.optInt("_ra", 0);
-            if (ra < REALERT_SECS.length && sec >= REALERT_SECS[ra] && !MainActivity.visible) {
+            if (ra < REALERT_SECS.length && sec >= REALERT_SECS[ra] && !MainActivity.visible && approvalNotifyNeeded()) {
                 try {
                     a.put("_ra", ra + 1);
                 } catch (Exception ignored) {
@@ -999,14 +1007,52 @@ public class HermesService extends Service {
         return dashToken;
     }
 
+    /** request ids answered in the app's own sheet: a late or repeated event for them must never ask again. */
+    private final java.util.LinkedHashSet<String> answeredIds = new java.util.LinkedHashSet<>();
+
+    /** The app's sheet answered this approval: forget it everywhere (list, notification, island) right now. */
+    void approvalAnsweredInApp(String requestId, String session) {
+        main.post(() -> {
+            synchronized (HermesService.this) {
+                if (requestId != null && !requestId.isEmpty()) {
+                    answeredIds.add(requestId);
+                    while (answeredIds.size() > 100) answeredIds.remove(answeredIds.iterator().next());
+                }
+                JSONObject hit = null;
+                for (JSONObject o : approvals) {
+                    String rid = o.optString("request_id", "");
+                    if (requestId != null && !requestId.isEmpty() ? requestId.equals(rid) : sameSession(o, session)) {
+                        hit = o;
+                        break;
+                    }
+                }
+                if (hit != null) {
+                    try {
+                        hit.put("_answered", true);
+                    } catch (Exception ignored) {
+                    }
+                    approvals.remove(hit);
+                    ignoreClear.add(hit.optString("session", "") + "|" + (System.currentTimeMillis() + 20_000)); // the plugin's report is for this one
+                    NotificationManager nm = getSystemService(NotificationManager.class);
+                    nm.cancel(approvalTag(hit), 2);
+                    dropEmptySummary(nm, approvalTag(hit));
+                    HistoryStore.append(this, "app", hit.optString("session", ""), hit.optString("command", hit.optString("what", "")), "answered in the app");
+                }
+                postStatus();
+                updateWake();
+            }
+        });
+    }
+
     /** Adds an approval to the waiting list and makes sure something is asking for it. */
     synchronized void queueApproval(JSONObject e) {
+        if (answeredIds.contains(e.optString("request_id", "x"))) return; // already answered in the app
         // The same request sent again (plugin retry): refresh it instead of stacking a copy.
         for (int k = approvals.size() - 1; k >= 0; k--) if (sameApproval(approvals.get(k), e)) approvals.remove(k);
         approvals.add(e);
         // Always remembered, even while the app is open: the in-app sheet can be lost (the page's socket drops in
         // the background) and then nothing else would still be asking. Only the popup waits.
-        if (!MainActivity.visible) postApprovalAlert(e, false);
+        if (!MainActivity.visible && approvalNotifyNeeded()) postApprovalAlert(e, false);
         postStatus();
         updateWake();
         keepPageAlive();
@@ -1272,6 +1318,11 @@ public class HermesService extends Service {
 
     /** The app came to the front or went away. Hidden with approvals waiting, their popups must exist (they were
      *  held back while the in-app sheet was showing); in front, the island steps aside. */
+    static void approvalAnswered(String requestId, String session) {
+        HermesService s = instance;
+        if (s != null) s.approvalAnsweredInApp(requestId, session);
+    }
+
     static void appVisibility(boolean visible) {
         HermesService s = instance;
         if (s != null) s.main.post(() -> s.onAppVisibility(visible));
@@ -1279,7 +1330,7 @@ public class HermesService extends Service {
 
     void onAppVisibility(boolean visible) {
         synchronized (this) {
-            if (!visible) for (JSONObject a : approvals) postApprovalAlert(a, false);
+            if (!visible && approvalNotifyNeeded()) for (JSONObject a : approvals) postApprovalAlert(a, false);
         }
         if (island != null) island.setSuppressed(visible);
         postStatus();
@@ -1363,6 +1414,51 @@ public class HermesService extends Service {
     }
 
     /** The island couldn't hand the message over: keep the text on the clipboard and say so. */
+    // ── a spoken question to Hermes: the page owns the connection, so it sends it and reports the final reply ──
+    interface HermesReply {
+        void on(String text); // the reply, or null when there was none
+    }
+
+    private HermesReply voiceWait;
+    private final Runnable voiceTimeout = () -> finishVoiceAsk(null);
+
+    /** Main thread. `fresh`: start a new chat for it; false continues the chat of the conversation going on. */
+    void askHermes(String text, boolean fresh, HermesReply cb) {
+        finishVoiceAsk(null); // one at a time
+        voiceWait = cb;
+        main.postDelayed(voiceTimeout, 180_000); // approvals can make a turn long
+        MainActivity a = MainActivity.current;
+        if (a != null && a.pageReady) {
+            a.deliverVoiceAsk(text, fresh, ok -> {
+                if (!ok) finishVoiceAsk(null);
+            });
+            return;
+        }
+        // The app isn't running: start it just long enough to carry the question, then it goes back.
+        MainActivity.queueVoice(text, fresh);
+        try {
+            startActivity(new Intent(this, MainActivity.class)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_NO_ANIMATION)
+                    .putExtra("island", true));
+        } catch (Exception ex) {
+            MainActivity.clearQueuedVoice();
+            finishVoiceAsk(null);
+        }
+    }
+
+    void finishVoiceAsk(String text) {
+        main.removeCallbacks(voiceTimeout);
+        HermesReply cb = voiceWait;
+        voiceWait = null;
+        if (cb != null) cb.on(text);
+    }
+
+    /** Any thread: the page reports the reply to the spoken question. */
+    static void voiceReplyAsync(String text) {
+        HermesService s = instance;
+        if (s != null) s.main.post(() -> s.finishVoiceAsk(text));
+    }
+
     void islandFailed(String text) {
         try {
             android.content.ClipboardManager cm = getSystemService(android.content.ClipboardManager.class);

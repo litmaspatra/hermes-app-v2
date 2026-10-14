@@ -44,6 +44,9 @@ export const setLivePhase = (live: VoiceState['live']): void => set({ live })
 export const setLiveMuted = (liveMuted: boolean): void => set({ liveMuted })
 
 /** Hooks between live mode (live.ts) and the rest of the app, kept here so gateway.ts needn't import it. */
+/** A question spoken to the phone's island: gateway.ts reports the finished reply here (see island.ts). */
+export const voiceAskBridge: { pending: boolean; onReply: (text: string) => void } = { pending: false, onReply: () => {} }
+
 export const liveBridge: {
   active: boolean
   onReply: (text: string) => void

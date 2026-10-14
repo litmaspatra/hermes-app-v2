@@ -21,7 +21,7 @@ import {
 } from '../bridge'
 import { confirmDialog } from '../dialog'
 import { toast } from '../store'
-import { haptic } from '../bridge'
+import { haptic, saveVoiceAliases, voiceAliases } from '../bridge'
 import { dynamicColorsOn, reduceEffectsOn, savedStyle, setDynamicColors, setReduceEffects, setStyle, type Style } from '../theme'
 import { Row, Section, Segmented, ToggleRow } from './ui'
 
@@ -107,6 +107,16 @@ export function StyleSection() {
 
 // ── Island ──────────────────────────────────────────────────
 
+const SPOTS = [
+  { id: 'free', label: 'Pinned', sub: 'Drag it; it stays where you drop it' },
+  { id: 'wander', label: 'Wander', sub: 'Strolls between spots' },
+  { id: 'tl', label: 'Top left', sub: 'Just under the status bar' },
+  { id: 'tc', label: 'Top centre', sub: 'Just under the status bar' },
+  { id: 'tr', label: 'Top right', sub: 'Just under the status bar' },
+  { id: 'ml', label: 'Left side', sub: 'Upper part of the side' },
+  { id: 'mr', label: 'Right side', sub: 'Upper part of the side' }
+]
+
 const PETS = [
   { id: 'blob', label: 'Blob', sub: 'Bouncy mint slime' },
   { id: 'mika', label: 'Mika', sub: 'Chibi girl, lavender hair' },
@@ -134,16 +144,27 @@ export function IslandPage() {
               ))}
             </div>
           </Section>
-          <Section title="When to show it" footer="On demand: hidden while idle. It appears when Hermes works, an approval waits, you drag something, or you trigger voice. A tiny invisible strip at the top centre stays so a drag has somewhere to land, and it blocks touches in that spot.">
+          <Section title="Position" footer="Always just under the status bar or on the upper part of a side, never the lower part of the screen. Wander strolls between spots every half minute or so when it is just hanging around. Drag the pet anywhere (also over the area an app's drag-and-drop covers): it stays exactly where you drop it. Turn on “Snap to spots” to make it jump to the nearest spot instead.">
+            <div className="pet-grid">
+              {SPOTS.map(p => (
+                <button key={p.id} className={`pet-card${s.pet_pos === p.id ? ' on' : ''}`} onClick={() => { haptic(); set('pet_pos', p.id) }}>
+                  <span className="pet-name">{p.label}</span>
+                  <span className="pet-sub">{p.sub}</span>
+                </button>
+              ))}
+            </div>
+          </Section>
+          <Section title="When to show it" footer="On demand: hidden while idle. It appears when Hermes works, an approval waits, you drag something, or you trigger voice. A tiny invisible strip stays where the pet last sat so a drag has somewhere to land, and it blocks touches in that spot.">
             <Segmented
               options={[{ value: 'ondemand', label: 'On demand' }, { value: 'always', label: 'Always' }]}
               value={s.island_mode}
               onChange={v => set('island_mode', v)}
             />
           </Section>
-          <Section footer="Status and approvals use the system island (the Live Update chip and its notification buttons). The floating pet sits below it so nothing is covered. Turn this off to hide the system island and keep only the floating pet at the very top.">
-            <ToggleRow icon="🏝" tone="gray" title="Use the system island" on={s.system_chip} onChange={v => set('system_chip', v)} />
+          <Section footer="Approvals are asked once: on the floating pet (text and buttons), and in a notification only when the pet can't show them (it is off, or the phone is locked). The system island can't show the animated pet, so it is off by default; turn it on only if you want its status chip as well.">
             <ToggleRow icon="🛡" tone="green" title="Approval buttons on the floating pet" on={s.island_approvals} onChange={v => set('island_approvals', v)} />
+            <ToggleRow icon="📌" tone="gray" title="Snap to spots after dragging" on={s.pet_snap} onChange={v => set('pet_snap', v)} />
+            <ToggleRow icon="🏝" tone="gray" title="Also use the system island (static icon)" on={s.system_chip} onChange={v => set('system_chip', v)} />
           </Section>
           <Section title="Drag and drop" footer="Drag an image, file, text or link from another app (gallery, browser, files) onto the floating pet. Android doesn't let apps receive drops on the system island itself, so the drop target is the pet, which appears under the system island while you drag. Type what Hermes should do and it runs in the background. The other app must support dragging out; if not, use Share → Hermes.">
             <Row icon="🖼" tone="blue" title="Drop to ask" sub="No setting needed" />
@@ -155,6 +176,27 @@ export function IslandPage() {
 }
 
 // ── Voice commands ──────────────────────────────────────────
+
+function AliasEditor() {
+  const [text, setText] = useState(() => voiceAliases())
+  return (
+    <Section title="Your names for people" footer="One per line: name = contact. For example “papa = Ramesh Sharma”. Misheard names that you confirm with “yes” are added here by themselves.">
+      <textarea
+        className="input"
+        rows={5}
+        value={text}
+        placeholder={'papa = Ramesh Sharma\nboss = Dr Mehta'}
+        onChange={e => setText(e.target.value)}
+        onBlur={() => {
+          const err = saveVoiceAliases(text)
+          if (err) toast(`Not saved: ${err}`, 'error')
+        }}
+        style={{ width: '100%', fontFamily: 'monospace' }}
+      />
+    </Section>
+  )
+}
+
 
 export function VoiceCommandsPage() {
   const [s, set] = useNative()
@@ -173,6 +215,12 @@ export function VoiceCommandsPage() {
             <ToggleRow icon="📞" tone="green" title="Allow calls" on={s.voice_calls_locked} onChange={v => set('voice_calls_locked', v)} />
             <ToggleRow icon="💬" tone="blue" title="Allow sending messages" on={s.voice_msgs_locked} onChange={v => set('voice_msgs_locked', v)} />
           </Section>
+          <Section title="Smarter voice" footer="Commands go to FastBrain on the phone for music, apps, aliases and more; calls and messages match your contacts here first, so they start at once and understand misheard names. Anything else is asked to Hermes. Say “let's talk” to keep a conversation going (it listens again after each answer until you say “stop”). Needs scripts/fastbrain-router-tcp.py running in Termux for FastBrain.">
+            <ToggleRow icon="🧠" tone="teal" title="Use FastBrain" on={s.voice_fastbrain} onChange={v => set('voice_fastbrain', v)} />
+            <ToggleRow icon="💬" tone="blue" title="Ask Hermes what FastBrain can't do" on={s.voice_hermes} onChange={v => set('voice_hermes', v)} />
+            <ToggleRow icon="🔁" tone="gold" title="Keep listening after Hermes answers" on={s.voice_follow} onChange={v => set('voice_follow', v)} />
+          </Section>
+          <AliasEditor />
           <Section title="Language">
             <Segmented options={[{ value: 'en-IN', label: 'English (India)' }, { value: 'hi-IN', label: 'हिन्दी' }]} value={s.voice_lang} onChange={v => set('voice_lang', v)} />
           </Section>

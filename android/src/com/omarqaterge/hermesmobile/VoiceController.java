@@ -7,6 +7,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.speech.RecognitionService;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -16,14 +17,17 @@ import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
 import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
 /**
- * One spoken command: vibrate, listen (offline if the recogniser can), parse, run, say the result.
- * The microphone opens only here, only after a trigger, and closes after 2.5 s of silence or 12 s in all.
+ * One spoken command: vibrate, listen (offline if the recogniser can), route (VoiceRouter), say the result.
+ * The microphone opens only here, only after a trigger. A command ends when it is done. It becomes a CONVERSATION
+ * (listen, reply, listen again ...) only when asked ("let's talk") or after Hermes answered a question; it ends on
+ * "stop", "that's all", or after two silences. A guess at a contact is confirmed with a short yes / no.
  * Main thread only.
  */
 final class VoiceController {
@@ -45,7 +49,14 @@ final class VoiceController {
     private int attempt = 0;
     private Ui ui;
     private int lastError = -1;
+    private boolean converse;            // a conversation is going: listen again after every answer
+    private int silent;                  // listens in a row that heard nothing
+    private boolean hermesChat;          // this conversation already has its Hermes chat
+    private VoiceRouter.Result asked;    // a guess waiting for "yes" / "no"
+    private Runnable afterSpeech;
+    private int speechId;
     private final Runnable giveUp = () -> finish(null);
+    private final Runnable speechGuard = this::speechDone;
 
     VoiceController(HermesService svc) {
         this.svc = svc;
@@ -103,28 +114,33 @@ final class VoiceController {
         if (active) return;
         this.ui = ui;
         if (!svc.getSharedPreferences("hm", Context.MODE_PRIVATE).getBoolean("voice_enabled", true)) {
-            say("Voice commands are turned off.");
+            say("Voice commands are turned off.", null);
             end();
             return;
         }
         if (svc.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             HermesService.askPermission(svc, Manifest.permission.RECORD_AUDIO);
-            say("I need the microphone permission.");
+            say("I need the microphone permission.", null);
             end();
             return;
         }
         if (!SpeechRecognizer.isRecognitionAvailable(svc)) {
-            say("Speech recognition isn't available on this phone.");
+            say("Speech recognition isn't available on this phone.", null);
             end();
             return;
         }
         if (realRecognizer(svc) == null) {
-            say("No speech recogniser is installed.");
+            say("No speech recogniser is installed.", null);
             end();
             return;
         }
         active = true;
         attempt = 0;
+        converse = false;
+        silent = 0;
+        asked = null;
+        hermesChat = false;
+        VoiceActions.warm(svc); // read the contacts now, so the first name is matched at once
         buzz();
         ui.transcript("");
         listen();
@@ -150,7 +166,7 @@ final class VoiceController {
                 @Override
                 public void onResults(Bundle b) {
                     ArrayList<String> l = b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-                    finish(l == null || l.isEmpty() ? null : l.get(0));
+                    finish(l == null || l.isEmpty() ? null : l);
                 }
 
                 @Override
@@ -175,12 +191,17 @@ final class VoiceController {
                     .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, attempt == 0)
                     .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
                     .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
-                    .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+                    .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5); // a few guesses: a misheard name is often the second one
+            if (Build.VERSION.SDK_INT >= 33) {
+                // Tell the recogniser which names to expect (contacts and your own aliases): it hears them far better.
+                List<String> names = VoiceActions.cachedNames(svc);
+                if (!names.isEmpty()) i.putExtra(RecognizerIntent.EXTRA_BIASING_STRINGS, new ArrayList<>(names.subList(0, Math.min(names.size(), 150))));
+            }
             String lang = svc.getSharedPreferences("hm", Context.MODE_PRIVATE).getString("voice_lang", "en-IN");
             if (attempt <= 1) i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang);
             else if (attempt == 3) i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US"); // attempt 2: no language = the phone's
             sr.startListening(i);
-            main.postDelayed(giveUp, 12_000);
+            main.postDelayed(giveUp, converse || asked != null ? 15_000 : 12_000);
         } catch (Exception e) {
             lastError = -2;
             finish(null);
@@ -190,32 +211,156 @@ final class VoiceController {
     void cancel() {
         main.removeCallbacks(giveUp);
         active = false;
+        converse = false;
+        asked = null;
+        afterSpeech = null;
+        main.removeCallbacks(speechGuard);
         destroyRecognizer();
+        if (tts != null && ttsReady) tts.stop();
         end();
     }
 
-    private void finish(String text) {
+    /** The recogniser gave up or heard nothing. In a conversation (or with a question open) that is not an error. */
+    private boolean quiet() {
+        return (converse || asked != null) && (lastError < 0 || lastError == SpeechRecognizer.ERROR_NO_MATCH || lastError == SpeechRecognizer.ERROR_SPEECH_TIMEOUT);
+    }
+
+    /** `heard`: the recogniser's guesses, best first; null when it heard nothing or failed. */
+    private void finish(List<String> heard) {
         if (!active) return;
         main.removeCallbacks(giveUp);
         active = false;
         destroyRecognizer();
-        String reply;
-        if (text == null || text.trim().isEmpty()) {
-            reply = lastError >= 0 ? describe(lastError) : "I didn't catch that.";
+        if (heard == null || heard.isEmpty() || heard.get(0).trim().isEmpty()) {
+            if (quiet()) {
+                lastError = -1;
+                silent++;
+                if (silent < 2 && asked == null) {
+                    relisten();
+                    return;
+                }
+                boolean wasTalking = converse;
+                asked = null;
+                converse = false;
+                String bye = wasTalking ? "Okay, I'll stop listening." : "Okay.";
+                if (ui != null) ui.transcript(bye);
+                say(bye, () -> main.postDelayed(this::end, 700));
+                return;
+            }
+            String reply = lastError >= 0 ? describe(lastError) : "I didn't catch that.";
             HistoryStore.append(svc, "voice", "", "(no speech)", "error " + lastError + ": " + reply);
             lastError = -1;
-        } else {
-            VoiceCommands.Command cmd = VoiceCommands.parse(text);
-            boolean locked = VoiceActions.locked(svc);
-            reply = VoiceActions.run(svc, cmd, locked);
-            HistoryStore.append(svc, "voice", "", text, cmd.type + ": " + reply);
+            if (ui != null) ui.transcript(reply);
+            converse = false;
+            asked = null;
+            say(reply, () -> main.postDelayed(this::end, 2500));
+            return;
         }
-        if (ui != null) ui.transcript(text == null || text.trim().isEmpty() ? reply : text + "\n" + reply);
-        say(reply);
-        main.postDelayed(this::end, text == null || text.trim().isEmpty() ? 4500 : 2500);
+        silent = 0;
+        lastError = -1;
+        final String text = heard.get(0).trim();
+        final boolean locked = VoiceActions.locked(svc);
+        if (ui != null) ui.transcript(text);
+        // 1. an open question ("Did you mean ...?") is answered with yes / no
+        if (asked != null) {
+            VoiceRouter.Result q = asked;
+            int yn = VoiceCommands.yesNo(text);
+            if (yn != 0) {
+                asked = null;
+                if (yn < 0) {
+                    reply("Okay, I won't.", text, "no", false);
+                } else if (q.fbConfirm) {
+                    active = true;
+                    VoiceRouter.answerFastBrain(svc, "yes", locked, r -> deliver(r, text));
+                } else if (q.confirm != null) {
+                    VoiceActions.Outcome o = VoiceActions.exec(svc, q.confirm, locked, null);
+                    if (o.confirm == null && q.heard != null) VoiceAliases.learn(svc, q.heard, q.confirm.name); // next time it is instant
+                    reply(o.reply, text, "confirmed " + q.confirm.type, converse);
+                }
+                return;
+            }
+            asked = null; // something else was said: it is a new command
+        }
+        // 2. talking about talking
+        if (converse && VoiceCommands.isConversationEnd(text)) {
+            converse = false;
+            reply("Okay.", text, "end", false);
+            return;
+        }
+        if (VoiceCommands.isConversationStart(text)) {
+            converse = true;
+            say("Okay, I'm listening.", this::relisten);
+            if (ui != null) ui.transcript(text + "\nOkay, I'm listening.");
+            return;
+        }
+        // 3. a command: routed off the main thread (FastBrain is a network call)
+        if (ui != null) ui.transcript(text + "\n…");
+        active = true; // busy until the answer is spoken: a second trigger must not start a second listener
+        VoiceRouter.route(svc, heard, locked, r -> deliver(r, text));
+    }
+
+    /** The router's answer, on the main thread. */
+    private void deliver(VoiceRouter.Result r, String text) {
+        if (ui == null) return; // cancelled meanwhile
+        if (r.toHermes) {
+            askHermes(r.hermesText);
+            return;
+        }
+        asked = r.confirm != null || r.fbConfirm ? r : null;
+        HistoryStore.append(svc, "voice", "", text, r.how + " " + r.detail + ": " + r.reply);
+        reply(r.reply, text, null, converse || asked != null);
+    }
+
+    /** Show and say the answer; then listen again (a conversation / a question) or finish. */
+    private void reply(String reply, String text, String log, boolean listenAgain) {
+        if (log != null) HistoryStore.append(svc, "voice", "", text, log + ": " + reply);
+        active = true; // still ours until the speech is over
+        if (ui != null) ui.transcript(text + "\n" + reply);
+        say(reply, listenAgain ? this::relisten : () -> {
+            active = false;
+            main.postDelayed(this::end, 1200);
+        });
+    }
+
+    /** Open questions go to Hermes, which can hold a conversation: its answer is read out, then it listens again. */
+    private void askHermes(String text) {
+        active = true;
+        if (ui != null) ui.transcript(text + "\nThinking…");
+        final boolean fresh = !hermesChat;
+        hermesChat = true;
+        svc.askHermes(text, fresh, answer -> {
+            if (ui == null) return;
+            if (answer == null || answer.trim().isEmpty()) {
+                HistoryStore.append(svc, "voice", "", text, "hermes: no answer");
+                reply("I couldn't get an answer from Hermes.", text, null, false);
+                return;
+            }
+            HistoryStore.append(svc, "voice", "", text, "hermes: answered");
+            if (svc.getSharedPreferences("hm", Context.MODE_PRIVATE).getBoolean("voice_follow", true)) converse = true;
+            String spoken = VoiceCommands.speakable(answer);
+            if (ui != null) ui.transcript(text + "\n" + spoken);
+            say(spoken, converse ? this::relisten : () -> {
+                active = false;
+                main.postDelayed(this::end, 1200);
+            });
+        });
+    }
+
+    /** Opens the microphone again inside the same conversation (no buzz, no reset). */
+    private void relisten() {
+        if (ui == null) return;
+        active = true;
+        attempt = 0;
+        lastError = -1;
+        ui.transcript("");
+        listen();
     }
 
     private void end() {
+        active = false;
+        converse = false;
+        asked = null;
+        hermesChat = false;
         Ui u = ui;
         ui = null;
         if (u != null) u.end();
@@ -240,9 +385,12 @@ final class VoiceController {
         }
     }
 
-    private void say(String s) {
+    private void say(String s, Runnable after) {
+        afterSpeech = after;
+        main.removeCallbacks(speechGuard);
+        main.postDelayed(speechGuard, 30_000); // never wait forever for a speech engine that stays silent
         if (ttsReady && tts != null) {
-            tts.speak(s, TextToSpeech.QUEUE_FLUSH, null, "hm-voice");
+            speakNow(s);
             return;
         }
         pendingSpeech = s;
@@ -251,11 +399,47 @@ final class VoiceController {
                 ttsReady = status == TextToSpeech.SUCCESS;
                 if (ttsReady) {
                     tts.setLanguage(Locale.getDefault());
-                    if (pendingSpeech != null) tts.speak(pendingSpeech, TextToSpeech.QUEUE_FLUSH, null, "hm-voice");
+                    tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                        @Override public void onStart(String id) {}
+
+                        @Override
+                        public void onDone(String id) {
+                            main.post(() -> {
+                                if (id != null && id.equals("hm-voice-" + speechId)) speechDone();
+                            });
+                        }
+
+                        @Override
+                        public void onError(String id) {
+                            main.post(() -> {
+                                if (id != null && id.equals("hm-voice-" + speechId)) speechDone();
+                            });
+                        }
+                    });
+                    if (pendingSpeech != null) speakNow(pendingSpeech);
+                } else {
+                    speechDone(); // no speech engine: carry on silently
                 }
                 pendingSpeech = null;
             }));
         }
+    }
+
+    private void speakNow(String s) {
+        speechId++;
+        if (s == null || s.trim().isEmpty()) {
+            speechDone();
+            return;
+        }
+        tts.speak(s, TextToSpeech.QUEUE_FLUSH, null, "hm-voice-" + speechId);
+    }
+
+    /** The answer has been spoken (or could not be): do what comes next, once. */
+    private void speechDone() {
+        main.removeCallbacks(speechGuard);
+        Runnable r = afterSpeech;
+        afterSpeech = null;
+        if (r != null) r.run();
     }
 
     void destroy() {

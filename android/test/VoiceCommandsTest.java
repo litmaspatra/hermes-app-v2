@@ -25,7 +25,26 @@ public class VoiceCommandsTest {
         System.exit(1);
     }
 
+    static void check(boolean ok, String what) {
+        n++;
+        if (!ok) fail(what);
+    }
+
     public static void main(String[] args) {
+        check(VoiceCommands.isConversationStart("Let's talk"), "start 1");
+        check(VoiceCommands.isConversationStart("hey hermes let's chat"), "start 2");
+        check(VoiceCommands.isConversationStart("Baat karte hain"), "start 3");
+        check(VoiceCommands.isConversationStart("conversation mode."), "start 4");
+        check(!VoiceCommands.isConversationStart("call Rahul"), "start 5");
+        check(!VoiceCommands.isConversationStart("let's talk about the budget for next year"), "start 6");
+        check(VoiceCommands.isConversationEnd("stop"), "end 1");
+        check(VoiceCommands.isConversationEnd("That's all"), "end 2");
+        check(VoiceCommands.isConversationEnd("okay thanks"), "end 3");
+        check(!VoiceCommands.isConversationEnd("stop the music"), "end 4");
+        check(VoiceCommands.yesNo("Yes") == 1 && VoiceCommands.yesNo("haan") == 1 && VoiceCommands.yesNo("nahi") == -1 && VoiceCommands.yesNo("call Rahul") == 0, "yes/no");
+        check(VoiceCommands.speakable("**Hi** there!\n- one\n- two\n```py\nprint(1)\n```\nSee [docs](http://x.y/z) or http://a.b").equals("Hi there! one two (code is in the chat) See docs or link"), "speakable: " + VoiceCommands.speakable("**Hi** there!\n- one\n- two\n```py\nprint(1)\n```\nSee [docs](http://x.y/z) or http://a.b"));
+        check(VoiceCommands.speakable("a. ".repeat(400)).endsWith("The rest is in the chat."), "speakable long");
+
         is("call Rahul", Type.CALL, "Rahul", "", 0, 0);
         is("Call Rahul Sharma please", Type.CALL, "Rahul Sharma", "", 0, 0);
         is("Rahul ko call karo", Type.CALL, "Rahul", "", 0, 0);

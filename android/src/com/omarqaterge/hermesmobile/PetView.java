@@ -62,6 +62,14 @@ final class PetView extends View {
         invalidate();
     }
 
+    private int walkDir = 0;
+
+    /** The pet is walking (or standing still again): it hops and leans the way it is going. */
+    void walk(int dir) {
+        walkDir = dir;
+        invalidate();
+    }
+
     void stop() {
         running = false;
     }
@@ -128,9 +136,9 @@ final class PetView extends View {
         float bounceAmp = pose[BOUNCE];
         float speed = mood == Mood.WORK ? 7f : mood == Mood.HAPPY || mood == Mood.DROP ? 6f : mood == Mood.SLEEP ? 1.6f : 3f;
         float ph = (float) Math.sin(sec * speed);
-        float dy = -s * bounceAmp * Math.abs(ph);
+        float dy = -s * bounceAmp * Math.abs(ph) - (walkDir != 0 ? s * 0.07f * Math.abs((float) Math.sin(sec * 11)) : 0f);
         float dx = s * 0.035f * pose[SHAKE] * (float) Math.sin(sec * 30);
-        float tilt = pose[TILT] * (float) (0.6 + 0.4 * Math.sin(sec * 1.5));
+        float tilt = pose[TILT] * (float) (0.6 + 0.4 * Math.sin(sec * 1.5)) + walkDir * 9f;
         float squash = bounceAmp * 0.9f * (1f - Math.abs(ph)); // squashed on the ground, stretched in the air
         c.save();
         c.translate(w / 2f + dx, h * 0.6f + dy);

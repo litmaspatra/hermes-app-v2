@@ -2,6 +2,7 @@ package com.omarqaterge.hermesmobile;
 
 import android.content.ClipData;
 import android.content.ClipDescription;
+import android.animation.ValueAnimator;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
@@ -25,7 +26,10 @@ import android.os.SystemClock;
 import android.provider.OpenableColumns;
 import android.provider.Settings;
 import android.text.InputType;
+import android.util.DisplayMetrics;
 import android.view.ContextThemeWrapper;
+import android.view.MotionEvent;
+import android.view.animation.DecelerateInterpolator;
 import android.view.DragEvent;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -106,6 +110,22 @@ final class IslandOverlay {
     private long noteUntil = 0;
     private final ArrayList<Uri> dropFiles = new ArrayList<>();
     private String dropText = "";
+
+    // ── where the pet sits: under the status bar, on the top part of the screen's sides or the middle ──
+    // tl top-left, tc top-centre, tr top-right, ml upper-left side, mr upper-right side; "wander" walks between them.
+    static final String[] ANCHORS = {"tc", "tr", "mr", "ml", "tl"};
+    private String curAnchor = "tc";
+    private ValueAnimator mover;
+    private boolean dragMoving, lastFull;
+    private String lastPref;
+    private float touchX, touchY;
+    private int startX, startY;
+    private final Runnable wanderTick = new Runnable() {
+        @Override
+        public void run() {
+            wander();
+        }
+    };
     IslandOverlay(HermesService svc) {
         this.svc = svc;
         this.ui = new ContextThemeWrapper(svc, android.R.style.Theme_DeviceDefault);
@@ -175,6 +195,8 @@ final class IslandOverlay {
     void destroy() {
         main.post(() -> {
             destroyed = true;
+            main.removeCallbacks(wanderTick);
+            if (mover != null) mover.cancel();
             remove();
         });
     }
@@ -222,9 +244,9 @@ final class IslandOverlay {
         LinearLayout texts = new LinearLayout(ui);
         texts.setOrientation(LinearLayout.VERTICAL);
         title = label("", 13, Color.WHITE, true);
-        title.setSingleLine(true);
+        title.setMaxLines(5); // a few lines: the transcript, a reply, what is being approved
         title.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        title.setMaxWidth(dp(220));
+        title.setMaxWidth(dp(250));
         sub = label("", 11, 0xFF9AA0A6, false);
         sub.setSingleLine(true);
         sub.setMaxWidth(dp(220));
@@ -234,6 +256,53 @@ final class IslandOverlay {
         tp.setMarginStart(dp(4));
         header.addView(texts, tp);
         header.setOnClickListener(v -> svc.islandOpenApp());
+        // Drag the pet to move it; it snaps to the nearest spot and stays there (Settings → Island → Position).
+        header.setOnTouchListener((v, e) -> {
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    touchX = e.getRawX();
+                    touchY = e.getRawY();
+                    if (added) {
+                        startX = lp.x;
+                        startY = lp.y;
+                    }
+                    dragMoving = false;
+                    return false;
+                case MotionEvent.ACTION_MOVE:
+                    if (!added) return false;
+                    if (!dragMoving && (Math.abs(e.getRawX() - touchX) > dp(10) || Math.abs(e.getRawY() - touchY) > dp(10))) {
+                        dragMoving = true;
+                        if (mover != null) mover.cancel();
+                        v.setPressed(false);
+                        pet.walk(0);
+                    }
+                    if (dragMoving) {
+                        lp.x = startX + (int) (e.getRawX() - touchX);
+                        lp.y = startY + (int) (e.getRawY() - touchY);
+                        try {
+                            wm.updateViewLayout(root, lp);
+                        } catch (Exception ignored) {
+                        }
+                        return true;
+                    }
+                    return false;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    if (dragMoving) {
+                        dragMoving = false;
+                        if (svc.getSharedPreferences("hm", Context.MODE_PRIVATE).getBoolean("pet_snap", false)) snapNearest();
+                        else pinHere();
+                        return true;
+                    }
+                    return false;
+                default:
+                    return false;
+            }
+        });
+        root.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            if (r - l != or - ol || b - t != ob - ot) main.post(() -> place(false)); // content changed size: keep it flush to its edge
+        });
+        main.postDelayed(wanderTick, 20_000);
         header.setOnLongClickListener(v -> {
             if (state.mood == Mood.SLEEP && !panelOpen) {
                 hiddenIdle = true; // idle only: it comes back as soon as Hermes works
@@ -248,10 +317,10 @@ final class IslandOverlay {
         approvalBox.setOrientation(LinearLayout.VERTICAL);
         approvalBox.setPadding(dp(4), dp(4), dp(4), dp(2));
         apWhat = label("", 12, Color.WHITE, true);
-        apWhat.setMaxLines(2);
+        apWhat.setMaxLines(4);
         apCmd = label("", 11, GOLD, false);
         apCmd.setTypeface(Typeface.MONOSPACE);
-        apCmd.setMaxLines(3);
+        apCmd.setMaxLines(8);
         apCmd.setEllipsize(android.text.TextUtils.TruncateAt.END);
         approvalBox.addView(apWhat);
         approvalBox.addView(apCmd);
@@ -360,13 +429,11 @@ final class IslandOverlay {
             return;
         }
         ensureAdded();
-        if (added && lp.y != topOffset()) {
-            lp.y = topOffset();
-            try {
-                wm.updateViewLayout(root, lp);
-            } catch (Exception ignored) {
-            }
-        }
+        lastFull = full;
+        String pp = posPref();
+        boolean moved = lastPref != null && !pp.equals(lastPref); // the user picked another spot in Settings: walk there
+        lastPref = pp;
+        place(moved);
         applyTheme(full);
 
         boolean approving = state.approval != null;
@@ -382,18 +449,19 @@ final class IslandOverlay {
         else if (panelOpen) t = "What should I do with it?";
         else if (m == Mood.ALERT) {
             t = state.secsLeft > 0 ? "Approve? " + state.secsLeft + "s" : "Approve? Still waiting";
-            if (state.approvals <= 1) s = "Answer in the notification";
+            if (state.approvals <= 1) s = "Tap Allow or Deny";
             if (state.approvals > 1) s = "+" + (state.approvals - 1) + " more waiting";
         } else if (idle) t = "";
         else t = state.text == null ? "" : state.text;
         if (listening) s = "";
         title.setText(t);
+        title.setTextSize(t.length() < 36 ? 13 : t.length() < 90 ? 11.5f : 10); // long text gets smaller, never cut off early
         title.setVisibility(t.isEmpty() ? View.GONE : View.VISIBLE);
         sub.setText(s);
         sub.setVisibility(s.isEmpty() || t.isEmpty() ? View.GONE : View.VISIBLE);
 
         // Approvals live in the system island (notification buttons). The floating pet only shows buttons if asked to.
-        boolean showApproval = approving && !dragging && !listening && svc.getSharedPreferences("hm", Context.MODE_PRIVATE).getBoolean("island_approvals", false);
+        boolean showApproval = approving && !dragging && !listening && svc.getSharedPreferences("hm", Context.MODE_PRIVATE).getBoolean("island_approvals", true);
         approvalBox.setVisibility(showApproval ? View.VISIBLE : View.GONE);
         if (approving) {
             String what = state.approval.optString("what", "");
@@ -402,6 +470,8 @@ final class IslandOverlay {
             String risk = ApprovalPolicy.risk(cmd);
             if (risk != null) what = "⚠ " + risk + (what.isEmpty() ? "" : " · " + what);
             apWhat.setText(what);
+            apWhat.setTextSize(what.length() < 80 ? 12 : 10.5f);
+            apCmd.setTextSize(cmd.length() < 70 ? 11 : cmd.length() < 160 ? 10 : 9); // the longer, the smaller
             apWhat.setVisibility(what.isEmpty() ? View.GONE : View.VISIBLE);
             apCmd.setText(cmd.isEmpty() ? "" : "$ " + cmd);
             apCmd.setVisibility(cmd.isEmpty() ? View.GONE : View.VISIBLE);
@@ -409,7 +479,7 @@ final class IslandOverlay {
         }
         dropBox.setVisibility(panelOpen && !dragging && !listening ? View.VISIBLE : View.GONE);
 
-        root.setMinimumWidth(!full ? dp(120) : dragging ? dp(250) : panelOpen || showApproval ? dp(300) : 0);
+        root.setMinimumWidth(!full ? dp(120) : dragging ? dp(250) : panelOpen || showApproval ? dp(320) : 0);
         root.setMinimumHeight(!full ? dp(20) : dragging ? dp(64) : 0);
         root.invalidate();
     }
@@ -532,7 +602,8 @@ final class IslandOverlay {
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT);
-        lp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+        lp.gravity = Gravity.TOP | Gravity.START; // x and y are absolute, so the pet can sit at either side
+        lp.x = Math.max(0, (svc.getResources().getDisplayMetrics().widthPixels - dp(120)) / 2);
         lp.y = topOffset();
         lp.setTitle("Hermes island");
         try {
@@ -542,6 +613,123 @@ final class IslandOverlay {
         } catch (Exception e) {
             added = false; // permission revoked meanwhile: the service drops the island on its next refresh
         }
+    }
+
+    private String posPref() {
+        return svc.getSharedPreferences("hm", Context.MODE_PRIVATE).getString("pet_pos", "wander");
+    }
+
+    /** Pixel position for a spot, for a window of the given size. */
+    private int[] anchorXY(String a, int w) {
+        DisplayMetrics dm = svc.getResources().getDisplayMetrics();
+        int margin = dp(8), top = topOffset();
+        int left = margin, right = Math.max(margin, dm.widthPixels - w - margin);
+        int x = (dm.widthPixels - w) / 2, y = top;
+        switch (a) {
+            case "tl":
+                x = left;
+                break;
+            case "tr":
+                x = right;
+                break;
+            case "ml":
+                x = left;
+                y = top + (int) (dm.heightPixels * 0.14f); // the upper part of the side, never the lower part
+                break;
+            case "mr":
+                x = right;
+                y = top + (int) (dm.heightPixels * 0.14f);
+                break;
+            default:
+                break;
+        }
+        return new int[] {Math.max(left, Math.min(right, x)), y};
+    }
+
+    /** Moves the window to where the chosen spot is; `animate` walks there. */
+    private void place(boolean animate) {
+        if (!added || root == null || dragMoving) return;
+        String pref = posPref();
+        String a = "wander".equals(pref) ? curAnchor : pref;
+        curAnchor = a;
+        int w = root.getWidth() > 0 ? root.getWidth() : dp(120);
+        int[] t = "free".equals(pref) ? freeXY(w) : anchorXY(a, w);
+        if (lp.x == t[0] && lp.y == t[1]) return;
+        if (mover != null && mover.isRunning()) return; // already walking; the end of the walk re-checks
+        if (!animate) {
+            lp.x = t[0];
+            lp.y = t[1];
+            try {
+                wm.updateViewLayout(root, lp);
+            } catch (Exception ignored) {
+            }
+            return;
+        }
+        final int fx = lp.x, fy = lp.y, tx = t[0], ty = t[1];
+        pet.walk(Integer.compare(tx, fx));
+        mover = ValueAnimator.ofFloat(0f, 1f);
+        mover.setDuration(900);
+        mover.setInterpolator(new DecelerateInterpolator());
+        mover.addUpdateListener(an -> {
+            float f = (float) an.getAnimatedValue();
+            lp.x = fx + (int) ((tx - fx) * f);
+            lp.y = fy + (int) ((ty - fy) * f);
+            try {
+                wm.updateViewLayout(root, lp);
+            } catch (Exception ignored) {
+            }
+            if (f >= 1f) {
+                pet.walk(0);
+                main.post(() -> place(false));
+            }
+        });
+        mover.start();
+    }
+
+    /** Every 20–40 s, if the pet is just hanging around, it strolls to another spot. */
+    private void wander() {
+        main.postDelayed(wanderTick, 20_000 + (long) (Math.random() * 20_000));
+        if (destroyed || !added || !"wander".equals(posPref()) || !lastFull) return;
+        if (listening || dragging || panelOpen || state.approval != null || dragMoving || suppressed) return;
+        String next = curAnchor;
+        for (int i = 0; i < 6 && next.equals(curAnchor); i++) next = ANCHORS[(int) (Math.random() * ANCHORS.length)];
+        curAnchor = next;
+        place(true);
+    }
+
+    /** Where the pet was pinned, as a fraction of the screen, kept on screen whatever the window's size. */
+    private int[] freeXY(int w) {
+        DisplayMetrics dm = svc.getResources().getDisplayMetrics();
+        android.content.SharedPreferences sp = svc.getSharedPreferences("hm", Context.MODE_PRIVATE);
+        int x = Math.round(sp.getFloat("pet_fx", 0.5f) * dm.widthPixels), y = Math.round(sp.getFloat("pet_fy", 0.02f) * dm.heightPixels);
+        int h = root.getHeight() > 0 ? root.getHeight() : dp(60);
+        return new int[] {Math.max(0, Math.min(dm.widthPixels - w, x)), Math.max(0, Math.min(dm.heightPixels - h, y))};
+    }
+
+    /** After a drag: stay exactly where it was dropped (Settings → Island → Position becomes "Pinned"). */
+    private void pinHere() {
+        DisplayMetrics dm = svc.getResources().getDisplayMetrics();
+        svc.getSharedPreferences("hm", Context.MODE_PRIVATE).edit().putString("pet_pos", "free")
+                .putFloat("pet_fx", lp.x / (float) dm.widthPixels).putFloat("pet_fy", lp.y / (float) dm.heightPixels).apply();
+        lastPref = "free";
+    }
+
+    /** After a drag: sit at the nearest spot, and stay there (the setting becomes that spot). */
+    private void snapNearest() {
+        int w = root.getWidth() > 0 ? root.getWidth() : dp(120);
+        String best = "tc";
+        long bestD = Long.MAX_VALUE;
+        for (String a : ANCHORS) {
+            int[] p = anchorXY(a, w);
+            long d = (long) (p[0] - lp.x) * (p[0] - lp.x) + (long) (p[1] - lp.y) * (p[1] - lp.y);
+            if (d < bestD) {
+                bestD = d;
+                best = a;
+            }
+        }
+        svc.getSharedPreferences("hm", Context.MODE_PRIVATE).edit().putString("pet_pos", best).apply();
+        curAnchor = best;
+        place(true);
     }
 
     /** Top of the island. With the system's own island also on, sit below the status bar so it doesn't cover ours. */

@@ -41,6 +41,10 @@ interface AndroidBridge {
   testCommand?(command: string, rulesJson: string): string
   history?(): string
   clearHistory?(): void
+  approvalAnswered?(requestId: string, session: string): void
+  voiceReply?(text: string): void
+  voiceAliases?(): string
+  saveVoiceAliases?(text: string): string
   systemColors?(): string // Material You colours (Android 12+), or 'null'
 }
 
@@ -268,8 +272,13 @@ export interface NativeSettings {
   voice_lang: string
   island_approvals: boolean
   pet: string
+  pet_pos: string
   system_chip: boolean
   assistant: boolean
+  voice_fastbrain: boolean
+  voice_hermes: boolean
+  voice_follow: boolean
+  pet_snap: boolean
 }
 export interface AllowRule {
   program: string
@@ -315,6 +324,16 @@ export function setNative(name: string, value: string | number | boolean): void 
     /* older shell */
   }
 }
+export const approvalAnswered = (requestId: string, session: string): void => {
+  try {
+    nat()?.approvalAnswered?.(requestId, session)
+  } catch {
+    /* older shell */
+  }
+}
+export const voiceReply = (text: string): void => nat()?.voiceReply?.(text)
+export const voiceAliases = (): string => nat()?.voiceAliases?.() ?? ''
+export const saveVoiceAliases = (text: string): string => nat()?.saveVoiceAliases?.(text) ?? 'not available'
 export const openOverlaySettings = (): void => nat()?.openOverlaySettings?.()
 export const requestVoicePermissions = (): void => nat()?.requestVoicePermissions?.()
 export const approvalState = (): ApprovalState | null => json<ApprovalState | null>(nat()?.approvalState?.(), null)

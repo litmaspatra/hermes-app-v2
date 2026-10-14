@@ -2,13 +2,15 @@
 // Hermes, so the native side hands it the text and the dropped files here. The island's files arrive through
 // the same bridge call as a Share-to-Hermes (sharedItem), so they are attached exactly as shared files are.
 import { attachFile, errText, sendPrompt, startDraft } from './gateway'
-import { sharedItem } from './bridge'
-import { setState, toast } from './store'
+import { sharedItem, voiceReply } from './bridge'
+import { voiceAskBridge } from './voice'
+import { getState, setState, toast } from './store'
 import { toFile, whenOnline } from './share'
 
 declare global {
   interface Window {
     hermesIsland?: (count: number, text: string) => string
+    hermesVoiceAsk?: (text: string, fresh: boolean) => string
   }
 }
 
@@ -43,5 +45,30 @@ export async function islandSend(count: number, text: string): Promise<void> {
 // Returns 'y' as soon as the request is accepted; the work continues asynchronously.
 window.hermesIsland = (count: number, text: string) => {
   void islandSend(Number(count) || 0, String(text || ''))
+  return 'y'
+}
+
+// A question spoken to the island: the phone listens and reads the answer out, this page just sends it and reports
+// Hermes's final reply. `fresh` starts a new chat; otherwise the question continues the chat of the conversation.
+async function voiceAsk(text: string, fresh: boolean): Promise<void> {
+  voiceAskBridge.onReply = voiceReply
+  try {
+    if (!(await whenOnline(30_000))) return voiceReply('')
+    if (fresh || !getState().active) {
+      setState({ screen: null, sheet: null })
+      startDraft()
+      await new Promise(r => setTimeout(r, 50))
+    }
+    voiceAskBridge.pending = true
+    await sendPrompt(text)
+  } catch (err) {
+    voiceAskBridge.pending = false
+    toast(errText(err), 'error')
+    voiceReply('')
+  }
+}
+
+window.hermesVoiceAsk = (text: string, fresh: boolean) => {
+  void voiceAsk(String(text || ''), Boolean(fresh))
   return 'y'
 }

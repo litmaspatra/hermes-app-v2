@@ -56,7 +56,7 @@ final class PetView extends View {
 
     void setSpecies(String s) {
         if (s == null) s = "blob";
-        if (!s.equals("blob") && !s.equals("mika") && !s.equals("cat")) s = "blob";
+        if (!s.equals("blob") && !s.equals("mika") && !s.equals("cat") && !PetSprites.isSprite(s)) s = "blob";
         if (s.equals(species)) return;
         species = s;
         invalidate();
@@ -84,7 +84,7 @@ final class PetView extends View {
     /** A still of one mood (for the system notification's large icon). */
     static Bitmap snapshot(Context c, String species, Mood mood, int px) {
         PetView v = new PetView(c);
-        v.species = "mika".equals(species) || "cat".equals(species) ? species : "blob";
+        v.species = "mika".equals(species) || "cat".equals(species) || PetSprites.isSprite(species) ? species : "blob";
         v.mood = mood;
         System.arraycopy(target(mood), 0, v.pose, 0, N); // no easing: show the mood itself
         Bitmap b = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888);
@@ -122,16 +122,60 @@ final class PetView extends View {
         float dt = lastMs == 0 ? 0.04f : Math.min(0.1f, (now - lastMs) / 1000f);
         lastMs = now;
         float[] t = target(mood);
-        float k = Math.min(1f, dt * 9f); // ease: about a third of a second to settle
+        float k = 1f - (float) Math.exp(-dt * 9f); // ease, the same at any frame rate
         for (int i = 0; i < N; i++) pose[i] += (t[i] - pose[i]) * k;
         paintPet(c, getWidth(), getHeight(), now / 1000f);
-        if (running && isAttachedToWindow()) postInvalidateDelayed(mood == Mood.SLEEP ? 70 : 33);
+        // Every screen refresh (60-120 Hz) while it moves; a sleeping pet only needs a slow drift.
+        if (running && isAttachedToWindow()) {
+            if (mood == Mood.SLEEP && walkDir == 0) postInvalidateDelayed(40);
+            else postInvalidateOnAnimation();
+        }
     }
 
     // ── drawing ───────────────────────────────────────────────
 
+    private final android.graphics.Rect srcR = new android.graphics.Rect();
+    private final RectF dstR = new RectF();
+    private final Paint spritePaint = new Paint(); // no smoothing: pixel art stays crisp
+    private Bitmap sheetBmp;
+    private String sheetFor = "";
+
+    /** A pet from AgentPets: the row for what Hermes is doing, the frame for the time. False if its sheet is missing. */
+    private boolean paintSprite(Canvas c, float w, float h, float sec) {
+        if (!species.equals(sheetFor)) {
+            sheetBmp = PetSprites.sheet(getContext(), species);
+            sheetFor = species;
+        }
+        if (sheetBmp == null) return false;
+        int st;
+        if (walkDir > 0) st = PetSprites.RIGHT;
+        else if (walkDir < 0) st = PetSprites.LEFT;
+        else switch (mood) {
+            case THINK: case LEARN: st = PetSprites.REVIEW; break;
+            case WORK: st = PetSprites.RUN; break;
+            case ALERT: case ASK: st = PetSprites.WAVE; break;
+            case HAPPY: case DROP: st = PetSprites.JUMP; break;
+            case SAD: st = PetSprites.FAIL; break;
+            case SLEEP: st = PetSprites.WAIT; break;
+            default: st = PetSprites.IDLE;
+        }
+        int[] d = PetSprites.STATES[st];
+        int frame = (int) ((sec * 1000f / d[2]) % 1f * d[1]);
+        int cw = sheetBmp.getWidth() / PetSprites.COLS, ch = sheetBmp.getHeight() / PetSprites.ROWS;
+        srcR.set(frame * cw, d[0] * ch, (frame + 1) * cw, (d[0] + 1) * ch);
+        float scale = Math.min(w / cw, h / ch);
+        float dw = cw * scale, dh = ch * scale;
+        dstR.set((w - dw) / 2f, h - dh, (w + dw) / 2f, h);
+        c.drawBitmap(sheetBmp, srcR, dstR, spritePaint);
+        return true;
+    }
+
     private void paintPet(Canvas c, float w, float h, float sec) {
         if (w <= 0 || h <= 0) return;
+        if (PetSprites.isSprite(species) && paintSprite(c, w, h, sec)) {
+            drawExtra(c, w, h, sec);
+            return;
+        }
         float s = Math.min(w, h);
         float bounceAmp = pose[BOUNCE];
         float speed = mood == Mood.WORK ? 7f : mood == Mood.HAPPY || mood == Mood.DROP ? 6f : mood == Mood.SLEEP ? 1.6f : 3f;
@@ -144,7 +188,7 @@ final class PetView extends View {
         c.translate(w / 2f + dx, h * 0.6f + dy);
         c.rotate(tilt);
         c.scale(1f + squash * 0.35f, 1f - squash * 0.35f);
-        switch (species) {
+        switch (PetSprites.isSprite(species) ? "blob" : species) {
             case "mika":
                 drawMika(c, s, sec);
                 break;

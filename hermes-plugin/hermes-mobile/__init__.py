@@ -117,10 +117,13 @@ def _termux_fallback(event: dict) -> None:
         pass
 
 
+_announced: dict = {}  # request_id -> (session id, session key) of approvals shown to the app and not yet closed
+
+
 def _send(kind: str, title: str = "Hermes", body: str = "", session: str = "", urgent: bool = False, **extra) -> None:
     """Fire-and-forget: never block a turn on notification delivery."""
     event = {"kind": kind, "title": title, "body": " ".join((body or "").split())[:500], "session": session or "",
-             "profile": _profile(), **extra}
+             "profile": _profile(), "ts": time.time(), **extra}
 
     def run():
         if not _post(event) and urgent:
@@ -420,9 +423,12 @@ def _on_pre_approval_request(command=None, description=None, session_key=None, s
         timeout = int(_get_approval_timeout())
     except Exception:
         timeout = 60
+    rid = _approval_request_id(session_key, command, kw.get("request_id"))
+    if rid:
+        with _lock:
+            _announced[rid] = (sid, session_key or "")  # so the answer can say WHICH request it closes
     _send("approval", "Approval needed", body, sid, urgent=True, key=session_key or "", timeout=timeout,
-          what=description or "", command=command or "",
-          request_id=_approval_request_id(session_key, command, kw.get("request_id")),
+          what=description or "", command=command or "", request_id=rid,
           allow_session=kw.get("allow_session") is not False)
 
 
@@ -442,9 +448,37 @@ def _approval_request_id(session_key, command, given=None) -> str:
     return ids[-1] if ids else ""
 
 
-def _on_post_approval_response(session_key=None, session_id=None, **_):
-    # Answered anywhere (app sheet, notification, timeout): drop the notification.
-    _send("clear", session=session_id or session_key or "", what="approval")
+def _remove_fallback_notification(sid: str) -> None:
+    """The Termux fallback notification (used when the app didn't answer in time) has no buttons and is never
+    cleared by the app: remove it, or it keeps showing an approval that was answered long ago."""
+    try:
+        subprocess.Popen(["termux-notification-remove", f"hm-approval-{sid}"], stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    except Exception:
+        pass
+
+
+def _on_post_approval_response(session_key=None, session_id=None, **kw):
+    # Answered anywhere (app sheet, notification, CLI, timeout): close exactly the request(s) that are no longer
+    # waiting. Hermes doesn't say which one, so compare what we announced with what is still pending; a clear
+    # without an id (old behaviour) would close the OLDEST one of the chat, which may be a different request.
+    sid = session_id or session_key or ""
+    _remove_fallback_notification(sid)
+    closed = []
+    try:
+        from tools.approval import list_gateway_approvals
+        pending = {str(p.get("request_id") or "") for p in list_gateway_approvals(session_key or "")}
+        with _lock:
+            closed = [r for r, (s_, k_) in _announced.items() if (s_ == sid or k_ == (session_key or "")) and r not in pending]
+            for r in closed:
+                _announced.pop(r, None)
+    except Exception:
+        given = kw.get("request_id")
+        closed = [str(given)] if given else []
+    for r in closed:
+        _send("clear", session=sid, what="approval", request_id=r)
+    if not closed:
+        _send("clear", session=sid, what="approval")
 
 
 def _on_api_request_error(session_id=None, turn_id=None, status_code=None, retryable=None, retry_count=None,

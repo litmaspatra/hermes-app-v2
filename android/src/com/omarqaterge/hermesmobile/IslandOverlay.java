@@ -277,8 +277,9 @@ final class IslandOverlay {
                         pet.walk(0);
                     }
                     if (dragMoving) {
-                        lp.x = startX + (int) (e.getRawX() - touchX);
-                        lp.y = startY + (int) (e.getRawY() - touchY);
+                        int[] c = clamp(startX + (int) (e.getRawX() - touchX), startY + (int) (e.getRawY() - touchY), false);
+                        lp.x = c[0];
+                        lp.y = c[1];
                         try {
                             wm.updateViewLayout(root, lp);
                         } catch (Exception ignored) {
@@ -429,6 +430,14 @@ final class IslandOverlay {
             return;
         }
         ensureAdded();
+        if (full && !lastFull && added) { // appears with a soft pop instead of snapping in
+            root.setPivotX(root.getWidth() / 2f);
+            root.setPivotY(0f);
+            root.setAlpha(0f);
+            root.setScaleX(0.9f);
+            root.setScaleY(0.9f);
+            root.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(260).setInterpolator(new android.view.animation.OvershootInterpolator(1.0f)).start();
+        }
         lastFull = full;
         String pp = posPref();
         boolean moved = lastPref != null && !pp.equals(lastPref); // the user picked another spot in Settings: walk there
@@ -514,20 +523,35 @@ final class IslandOverlay {
             root.setPadding(dp(10), dp(6), padR, padB);
         } else {
             GradientDrawable g = new GradientDrawable();
+            int r = dp(28); // soft, large corners (the idle pill is round)
             if ("glass".equals(th)) {
-                ink = 0xFF14161A;
-                ink2 = 0xFF3A3F47;
-                g.setColor(0xCCFFFFFF);
-                g.setCornerRadius(dp(26));
-                g.setStroke(dp(2), (stroke & 0x00FFFFFF) | 0xCC000000);
+                // iOS-style frosted glass: a translucent tint, a bright rim that fades down the edge, and a soft sheen at the top.
+                boolean reduce = svc.getSharedPreferences("hm", Context.MODE_PRIVATE).getBoolean("reduce_effects", false);
+                ink = night ? 0xFFF5F5F7 : 0xFF1C1C1E;
+                ink2 = night ? 0xCCEBEBF5 : 0xB33C3C43;
+                GradientDrawable body = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                        night ? new int[] {reduce ? 0xF02C2C2E : 0x8C3A3A3C, reduce ? 0xF01C1C1E : 0x802C2C2E}
+                              : new int[] {reduce ? 0xF2FFFFFF : 0xB8FFFFFF, reduce ? 0xF2F2F2F7 : 0x9EF2F2F7});
+                body.setCornerRadius(r);
+                body.setStroke(dp(1), (stroke & 0x00FFFFFF) | 0x66000000);
+                GradientDrawable sheen = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                        new int[] {night ? 0x33FFFFFF : 0x99FFFFFF, 0x00FFFFFF});
+                sheen.setCornerRadius(r);
+                LayerDrawable gl = new LayerDrawable(new Drawable[] {body, sheen});
+                gl.setLayerInset(1, dp(1), dp(1), dp(1), full ? root.getHeight() / 2 : 0);
+                g = null;
+                bgd = gl;
             } else {
-                ink = night ? 0xFFE6E0E9 : 0xFF1D1B20;
-                ink2 = night ? 0xFFCAC4D0 : 0xFF49454F;
-                g.setColor(night ? 0xFF2B2930 : 0xFFF3EDF7);
-                g.setCornerRadius(dp(28));
-                g.setStroke(dp(2), (stroke & 0x00FFFFFF) | 0x99000000);
+                // The phone's own colours (Material You), like the rest of the app; fixed ones where the phone has none.
+                boolean dyn = Build.VERSION.SDK_INT >= 31;
+                int surface = night ? (dyn ? svc.getColor(android.R.color.system_neutral1_800) : 0xFF2B2930) : (dyn ? svc.getColor(android.R.color.system_neutral1_50) : 0xFFF3EDF7);
+                ink = night ? (dyn ? svc.getColor(android.R.color.system_neutral1_100) : 0xFFE6E0E9) : (dyn ? svc.getColor(android.R.color.system_neutral1_900) : 0xFF1D1B20);
+                ink2 = (ink & 0x00FFFFFF) | 0xB3000000;
+                g.setColor(surface);
+                g.setCornerRadius(r);
+                g.setStroke(dp(1), (stroke & 0x00FFFFFF) | 0x80000000);
+                bgd = g;
             }
-            bgd = g;
             root.setPadding(dp(10), dp(6), padR, padB);
         }
         root.setBackground(bgd);
@@ -648,7 +672,7 @@ final class IslandOverlay {
 
     /** Moves the window to where the chosen spot is; `animate` walks there. */
     private void place(boolean animate) {
-        if (!added || root == null || dragMoving) return;
+        if (!added || root == null || dragMoving || dodgeFromX >= 0) return;
         String pref = posPref();
         String a = "wander".equals(pref) ? curAnchor : pref;
         curAnchor = a;
@@ -702,12 +726,73 @@ final class IslandOverlay {
         DisplayMetrics dm = svc.getResources().getDisplayMetrics();
         android.content.SharedPreferences sp = svc.getSharedPreferences("hm", Context.MODE_PRIVATE);
         int x = Math.round(sp.getFloat("pet_fx", 0.5f) * dm.widthPixels), y = Math.round(sp.getFloat("pet_fy", 0.02f) * dm.heightPixels);
-        int h = root.getHeight() > 0 ? root.getHeight() : dp(60);
-        return new int[] {Math.max(0, Math.min(dm.widthPixels - w, x)), Math.max(0, Math.min(dm.heightPixels - h, y))};
+        return clamp(x, y, false);
+    }
+
+    /** Keeps the whole window on the screen. `magnet`: within a thumb's width of an edge or corner it sits flush against it. */
+    private int[] clamp(int x, int y, boolean magnet) {
+        DisplayMetrics dm = svc.getResources().getDisplayMetrics();
+        int w = root.getWidth() > 0 ? root.getWidth() : dp(120), h = root.getHeight() > 0 ? root.getHeight() : dp(60);
+        int m = dp(6), snap = dp(44);
+        int minX = m, maxX = Math.max(m, dm.widthPixels - w - m), minY = m, maxY = Math.max(m, dm.heightPixels - h - m);
+        x = Math.max(minX, Math.min(maxX, x));
+        y = Math.max(minY, Math.min(maxY, y));
+        if (magnet) {
+            if (x - minX < snap) x = minX;
+            else if (maxX - x < snap) x = maxX;
+            if (y - minY < snap) y = minY;
+            else if (maxY - y < snap) y = maxY;
+        }
+        return new int[] {x, y};
+    }
+
+    // A drag from another app puts its own drag-and-drop UI over the top of the screen: the pet steps down to the
+    // bottom corner nearest to it for the drag (it is still a drop target there) and goes back afterwards.
+    private int dodgeFromX = -1, dodgeFromY = -1;
+
+    private void dodge() {
+        if (!added || dragMoving || dodgeFromX >= 0) return;
+        DisplayMetrics dm = svc.getResources().getDisplayMetrics();
+        if (lp.y > dm.heightPixels * 0.3f) return; // not in the way
+        dodgeFromX = lp.x;
+        dodgeFromY = lp.y;
+        int[] t = clamp(lp.x, dm.heightPixels, true); // straight down to the bottom edge, or the corner if it is near one
+        glideTo(t[0], t[1]);
+    }
+
+    private void undodge() {
+        if (dodgeFromX < 0) return;
+        int x = dodgeFromX, y = dodgeFromY;
+        dodgeFromX = dodgeFromY = -1;
+        glideTo(x, y);
+    }
+
+    /** A smooth slide of the window (the same easing as a walk, without the pet's walking pose). */
+    private void glideTo(int tx, int ty) {
+        if (!added) return;
+        if (mover != null) mover.cancel();
+        final int fx = lp.x, fy = lp.y;
+        mover = ValueAnimator.ofFloat(0f, 1f);
+        mover.setDuration(380);
+        mover.setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f));
+        mover.addUpdateListener(an -> {
+            float f = (float) an.getAnimatedValue();
+            lp.x = fx + (int) ((tx - fx) * f);
+            lp.y = fy + (int) ((ty - fy) * f);
+            try {
+                wm.updateViewLayout(root, lp);
+            } catch (Exception ignored) {
+            }
+        });
+        mover.start();
     }
 
     /** After a drag: stay exactly where it was dropped (Settings → Island → Position becomes "Pinned"). */
     private void pinHere() {
+        int[] c = clamp(lp.x, lp.y, true); // inside the screen, flush to an edge or corner when dropped near one
+        if (c[0] != lp.x || c[1] != lp.y) glideTo(c[0], c[1]);
+        lp.x = c[0];
+        lp.y = c[1];
         DisplayMetrics dm = svc.getResources().getDisplayMetrics();
         svc.getSharedPreferences("hm", Context.MODE_PRIVATE).edit().putString("pet_pos", "free")
                 .putFloat("pet_fx", lp.x / (float) dm.widthPixels).putFloat("pet_fy", lp.y / (float) dm.heightPixels).apply();
@@ -787,6 +872,7 @@ final class IslandOverlay {
                 if (d == null || d.getMimeTypeCount() == 0 || suppressed) return false;
                 dragging = true;
                 hovering = false;
+                dodge();
                 render();
                 return true;
             }
@@ -803,6 +889,7 @@ final class IslandOverlay {
             case DragEvent.ACTION_DROP:
                 return onDrop(e);
             case DragEvent.ACTION_DRAG_ENDED:
+                undodge();
                 dragging = false;
                 hovering = false;
                 render();

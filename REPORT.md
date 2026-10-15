@@ -1,5 +1,14 @@
 # Hermes Mobile v2: report
 
+## v2.5
+- **Approvals**: the plugin now says exactly WHICH request closed (it compares what it announced with what Hermes still has pending), stamps events with the time Hermes asked, and removes its own Termux fallback notification; the app closes by request id, remembers closed ids so a late event can't re-open one, and ignores approvals past their deadline. Redeploy `hermes-plugin/hermes-mobile` to Hermes as well as the APK.
+- **System island**: strictly opt-in (no chronometer / Live Update style unless the toggle is on).
+- **Music by voice**: FastBrain router first; if it doesn't take it, the request goes to Hermes (its pre-router: Gemini, Hindsight Lite, music helper); YouTube only if you say "youtube". Settings → Voice → Test FastBrain says what is wrong.
+- **Pets**: AgentPets spritesheets (8x9 grid) downloaded on demand; pets keep inside the screen, flush to edges/corners when dropped near them, step away from a system drag; vsync animation; Material You colours; iOS-style frosted island.
+- **Natural voice**: KittenTTS server + phrase planner (breaths, pace by mood); falls back to the phone's voice.
+- **Icon**: pixelated and smaller.
+Not run on a phone.
+
 ## v2.4: voice with FastBrain, conversations, one approval, pin the pet
 Compiled here against android-36 (all Java), pure-Java tests (ApprovalPolicy 87, VoiceCommands 60, ContactMatcher 21), web typecheck, 88 web tests, `vite build`. NOT run on a phone.
 - **Pet**: drag it anywhere, it stays where you drop it (Position → Pinned). "Snap to spots" restores the old snapping. Text on the island is multi-line (up to 5 lines) and shrinks when long; approvals show the description and the whole command (up to 8 lines, smaller when long), buttons on by default.

@@ -78,7 +78,7 @@ public class HermesService extends Service {
     long flashMoodUntil = 0;
     boolean tickScheduled = false;
     /** An unanswered approval is dropped after its time plus this, in case the plugin never reports it closed. */
-    static final long APPROVAL_STALE_MS = 5 * 60_000L;
+    static final long APPROVAL_STALE_MS = 15_000L; // Hermes gives up at the deadline: an approval past it is gone, whatever the plugin said
     static final int[] REALERT_SECS = {15, 45, 90, 150, 240};
     // A short-lived "flash" in the status chip (done ✅, memory/skill updates); reverts after FLASH_MS.
     String flashChip = null, flashTitle = null, flashBody = null;
@@ -405,9 +405,16 @@ public class HermesService extends Service {
             }
             case "approval": {
                 long now = System.currentTimeMillis();
+                // The clock starts when Hermes asked (the event's own time), not when it reached us: a delayed or replayed
+                // event for an approval that already timed out must not ask again.
+                long asked = now;
+                double ts = e.optDouble("ts", 0);
+                if (ts > 1e9 && Math.abs(ts * 1000 - now) < 10 * 60_000L) asked = (long) (ts * 1000);
+                long deadline = asked + Math.max(1, e.optLong("timeout", 300)) * 1000L;
+                if (deadline < now) return;
                 try {
-                    e.put("_deadline", now + Math.max(1, e.optLong("timeout", 300)) * 1000L);
-                    e.put("_at", now);
+                    e.put("_deadline", deadline);
+                    e.put("_at", asked);
                 } catch (Exception ignored) {
                 }
                 // Read-only commands on the user's allowlist are answered "once" without asking (off by default).
@@ -476,7 +483,9 @@ public class HermesService extends Service {
                     postStatus();
                 }
                 if ("approval".equals(e.optString("what"))) {
-                    clearApproval(session);
+                    String rid = e.optString("request_id", "");
+                    if (!rid.isEmpty()) clearApprovalById(rid); // exact: this request, nothing else
+                    else clearApproval(session);
                     return;
                 }
                 String t = tag(e.optString("what", "reply"), session);
@@ -547,13 +556,14 @@ public class HermesService extends Service {
                 .setOnlyAlertOnce(true)
                 .setShowWhen(working)
                 .setContentIntent(openApp(lastSession));
-        if (working && workingSince > 0) b.setWhen(workingSince).setUsesChronometer(true);
+        // A running chronometer is what some phones (HyperOS, OriginOS) turn into their own island: only with the chip on.
+        if (working && workingSince > 0 && systemChipWanted()) b.setWhen(workingSince).setUsesChronometer(true);
         if (sub != null) b.setSubText(sub);
         if (working) {
             // Android 16 Live Update: a promoted ongoing notification gets a status-bar chip
             // (HyperOS shows it in the Hyper Island around the camera). Only while working, so
             // the chip disappears when Hermes is idle. Expanded: a live gold progress sweep.
-            if (Build.VERSION.SDK_INT >= 36) {
+            if (Build.VERSION.SDK_INT >= 36 && systemChipWanted()) {
                 b.setStyle(new Notification.ProgressStyle()
                         .setProgressIndeterminate(true)
                         .setStyledByProgress(false)
@@ -571,7 +581,7 @@ public class HermesService extends Service {
 
     /** True when the app's own floating island is on screen duty: then the system's island (Live Update chip) stays off. */
     boolean systemChipWanted() {
-        return island == null || getSharedPreferences("hm", MODE_PRIVATE).getBoolean("system_chip", false);
+        return getSharedPreferences("hm", MODE_PRIVATE).getBoolean("system_chip", false); // only if you turn it on
     }
 
     /**
@@ -1104,6 +1114,20 @@ public class HermesService extends Service {
         postGrouped(nm, t, b.build());
     }
 
+    /** The plugin says THIS request is closed (answered anywhere, or timed out). Remembered, so an approval event that
+     *  arrives after its own "closed" (the two travel separately) is dropped too. */
+    synchronized void clearApprovalById(String rid) {
+        answeredIds.add(rid);
+        while (answeredIds.size() > 100) answeredIds.remove(answeredIds.iterator().next());
+        for (JSONObject a : approvals) {
+            if (rid.equals(a.optString("request_id", ""))) {
+                removeApproval(a, true);
+                return;
+            }
+        }
+        postStatus();
+    }
+
     /** The plugin reports an approval closed (answered anywhere, or timed out): take the oldest one of that chat off. */
     synchronized void clearApproval(String session) {
         long now = System.currentTimeMillis();
@@ -1451,6 +1475,13 @@ public class HermesService extends Service {
         HermesReply cb = voiceWait;
         voiceWait = null;
         if (cb != null) cb.on(text);
+    }
+
+    /** Settings → Voice → Test voice: a sample in the natural voice (silent if its server isn't running; the test button says why). */
+    static void sayTest() {
+        HermesService s = instance;
+        if (s == null) return;
+        s.main.post(() -> new NeuralTts(s).speak("Hi, this is how I sound now. Sorry if I was a bit robotic before... better?", () -> {}, () -> {}));
     }
 
     /** Any thread: the page reports the reply to the spoken question. */

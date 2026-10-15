@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT="$(mktemp -d)"
 P=android/src/com/omarqaterge/hermesmobile
-javac -encoding UTF-8 -source 11 -target 11 -Xlint:-options -d "$OUT" "$P/ApprovalPolicy.java" "$P/VoiceCommands.java" "$P/ContactMatcher.java" android/test/*.java
-for t in ApprovalPolicyTest VoiceCommandsTest ContactMatcherTest; do
+javac -encoding UTF-8 -source 11 -target 11 -Xlint:-options -d "$OUT" "$P/ApprovalPolicy.java" "$P/VoiceCommands.java" "$P/ContactMatcher.java" "$P/ProsodyPlanner.java" android/test/*.java
+for t in ApprovalPolicyTest VoiceCommandsTest ContactMatcherTest ProsodyPlannerTest; do
   java -cp "$OUT" "com.omarqaterge.hermesmobile.$t"
 done

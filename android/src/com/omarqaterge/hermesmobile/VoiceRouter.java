@@ -34,6 +34,7 @@ final class VoiceRouter {
         VoiceCommands.Command confirm;       // a guess to confirm: run this on "yes"
         String heard;                        // what was said for it, to remember as an alias after "yes"
         boolean fbConfirm;                   // FastBrain asked "Did you mean ...?": send it the yes / no
+        boolean command;                     // a task for Hermes (play a song), not a chat: no conversation afterwards
         String how = "native";               // for History: native | fastbrain | hermes
         String detail = "";
     }
@@ -116,6 +117,17 @@ final class VoiceRouter {
                 if (fb) {
                     Result f = viaFastBrain(c, text, locked);
                     if (f != null) return f;
+                }
+                // Only "... on YouTube" is a YouTube search. Anything else the router didn't take ("play a song", a
+                // vague mood) is for Hermes: its FastBrain pre-router (Gemini for fuzzy requests, Hindsight Lite,
+                // the music helper) plays it in the music app you set up; opening YouTube would ignore all of that.
+                boolean youtube = text.toLowerCase(Locale.ROOT).contains("youtube");
+                if (!youtube && !locked && c.getSharedPreferences("hm", Context.MODE_PRIVATE).getBoolean("voice_hermes", true)) {
+                    r.toHermes = true;
+                    r.command = true;
+                    r.hermesText = text;
+                    r.how = "hermes";
+                    return r;
                 }
                 r.reply = VoiceActions.run(c, cmd, locked);
                 return r;

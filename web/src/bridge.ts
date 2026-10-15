@@ -43,6 +43,14 @@ interface AndroidBridge {
   clearHistory?(): void
   approvalAnswered?(requestId: string, session: string): void
   voiceReply?(text: string): void
+  fastbrainStatus?(): string
+  neuralTtsStatus?(): string
+  testVoice?(): void
+  setTtsVoice?(voice: string): void
+  petCatalog?(query: string): string
+  installPet?(slug: string, url: string): string
+  installedPets?(): string
+  selectPet?(slug: string): void
   voiceAliases?(): string
   saveVoiceAliases?(text: string): string
   systemColors?(): string // Material You colours (Android 12+), or 'null'
@@ -278,6 +286,8 @@ export interface NativeSettings {
   voice_fastbrain: boolean
   voice_hermes: boolean
   voice_follow: boolean
+  voice_neural: boolean
+  tts_voice: string
   pet_snap: boolean
 }
 export interface AllowRule {
@@ -331,6 +341,20 @@ export const approvalAnswered = (requestId: string, session: string): void => {
     /* older shell */
   }
 }
+export const petCatalog = (query: string): { slug: string; name: string; url: string }[] => {
+  try {
+    return JSON.parse(nat()?.petCatalog?.(query) || '[]')
+  } catch {
+    return []
+  }
+}
+export const installPet = (slug: string, url: string): string => nat()?.installPet?.(slug, url) ?? 'not available'
+export const installedPets = (): string[] => (nat()?.installedPets?.() || '').split(',').filter(Boolean)
+export const selectPet = (slug: string): void => nat()?.selectPet?.(slug)
+export const neuralTtsStatus = (): string => nat()?.neuralTtsStatus?.() ?? 'not available'
+export const testVoice = (): void => nat()?.testVoice?.()
+export const setTtsVoice = (v: string): void => nat()?.setTtsVoice?.(v)
+export const fastbrainStatus = (): string => nat()?.fastbrainStatus?.() ?? 'not available'
 export const voiceReply = (text: string): void => nat()?.voiceReply?.(text)
 export const voiceAliases = (): string => nat()?.voiceAliases?.() ?? ''
 export const saveVoiceAliases = (text: string): string => nat()?.saveVoiceAliases?.(text) ?? 'not available'

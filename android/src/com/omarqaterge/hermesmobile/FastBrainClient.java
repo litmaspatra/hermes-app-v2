@@ -36,6 +36,28 @@ final class FastBrainClient {
         return c.getSharedPreferences("hermes", Context.MODE_PRIVATE).getString("event_key", "");
     }
 
+    /** What is wrong, in words (Settings → Voice → Test FastBrain). Blocking. */
+    static String status(Context c) {
+        HttpURLConnection h = null;
+        try {
+            h = (HttpURLConnection) new URL("http://127.0.0.1:" + PORT + "/health").openConnection();
+            h.setConnectTimeout(800);
+            h.setReadTimeout(3000);
+            h.setRequestProperty("X-Hermes-Mobile-Key", key(c));
+            int code = h.getResponseCode();
+            if (code == 200) return "FastBrain is connected.";
+            if (code == 403) return "FastBrain's bridge refused the app's key. Open Hermes once (the app rewrites ~/.hermes-mobile/key), then restart the bridge.";
+            if (code == 503) return "The bridge is running but the FastBrain router isn't. Run start-fastbrain-router.sh in Termux.";
+            return "FastBrain answered HTTP " + code + ".";
+        } catch (java.net.ConnectException e) {
+            return "The FastBrain bridge isn't running. In Termux: bash ~/FastBrain/scripts/start-fastbrain-router.sh (use the updated FastBrain).";
+        } catch (Exception e) {
+            return "Couldn't reach FastBrain: " + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+        } finally {
+            if (h != null) h.disconnect();
+        }
+    }
+
     /**
      * Ask the router. `execute` false only routes (which skill, which arguments) and runs nothing; true also runs
      * the action. `readMs`: how long to wait for the answer (an action can take seconds; the connect is 500 ms).

@@ -1223,7 +1223,7 @@ public class MainActivity extends Activity {
         }
 
         // ── v2: island, voice, approvals, themes (Settings screens in the page talk to these) ──
-        private final String[] BOOL_PREFS = {"island", "auto_readonly", "voice_enabled", "voice_calls_locked", "voice_msgs_locked", "island_approvals", "system_chip", "reduce_effects", "voice_fastbrain", "voice_hermes", "voice_follow", "pet_snap"};
+        private final String[] BOOL_PREFS = {"island", "auto_readonly", "voice_enabled", "voice_calls_locked", "voice_msgs_locked", "island_approvals", "system_chip", "reduce_effects", "voice_fastbrain", "voice_hermes", "voice_follow", "pet_snap", "voice_neural"};
         private final String[] STR_PREFS = {"island_mode", "theme", "voice_lang", "pet", "pet_pos"};
 
         /** All native settings as JSON, with their defaults. */
@@ -1251,6 +1251,8 @@ public class MainActivity extends Activity {
                         .put("voice_hermes", sp.getBoolean("voice_hermes", true))
                         .put("voice_follow", sp.getBoolean("voice_follow", true))
                         .put("pet_snap", sp.getBoolean("pet_snap", false))
+                        .put("voice_neural", sp.getBoolean("voice_neural", true))
+                        .put("tts_voice", NeuralTts.voice(MainActivity.this))
                         .put("assistant", isAssistant(key)).toString();
             } catch (Exception e) {
                 return "{}";
@@ -1262,6 +1264,61 @@ public class MainActivity extends Activity {
         public void approvalAnswered(String key, String requestId, String session) {
             if (!ok(key)) return;
             HermesService.approvalAnswered(requestId == null ? "" : requestId, session == null ? "" : session);
+        }
+
+        /** AgentPets catalogue as JSON [{slug,name,url}], filtered by `query` (empty on failure). Blocking. */
+        @JavascriptInterface
+        public String petCatalog(String key, String query) {
+            return ok(key) ? PetSprites.catalog(query, 40) : "";
+        }
+
+        /** Downloads a pet's spritesheet and makes it the pet. "" = done, otherwise what went wrong. Blocking. */
+        @JavascriptInterface
+        public String installPet(String key, String slug, String url) {
+            if (!ok(key)) return "not allowed";
+            String err = PetSprites.install(MainActivity.this, slug, url);
+            if (err.isEmpty()) selectPet(key, slug);
+            return err;
+        }
+
+        /** Installed AgentPets slugs, comma separated. */
+        @JavascriptInterface
+        public String installedPets(String key) {
+            return ok(key) ? String.join(",", PetSprites.installed(MainActivity.this)) : "";
+        }
+
+        /** Picks an installed AgentPets pet. */
+        @JavascriptInterface
+        public void selectPet(String key, String slug) {
+            if (!ok(key) || !PetSprites.validSlug(slug) || !PetSprites.installed(MainActivity.this).contains(slug)) return;
+            getSharedPreferences("hm", MODE_PRIVATE).edit().putString("pet", PetSprites.PREFIX + slug).apply();
+            HermesService.refreshIslandAsync();
+        }
+
+        /** Is the natural-voice server up? Plain words. Blocking. */
+        @JavascriptInterface
+        public String neuralTtsStatus(String key) {
+            return ok(key) ? NeuralTts.status(MainActivity.this) : "not allowed";
+        }
+
+        /** Speaks a short sample with the natural voice (or the phone's own if the server is down). */
+        @JavascriptInterface
+        public void testVoice(String key) {
+            if (!ok(key)) return;
+            HermesService.sayTest();
+        }
+
+        /** One of NeuralTts.VOICES. */
+        @JavascriptInterface
+        public void setTtsVoice(String key, String voice) {
+            if (!ok(key)) return;
+            for (String v : NeuralTts.VOICES) if (v.equals(voice)) getSharedPreferences("hm", MODE_PRIVATE).edit().putString("tts_voice", voice).apply();
+        }
+
+        /** Is the FastBrain bridge reachable? Plain words for Settings → Voice. */
+        @JavascriptInterface
+        public String fastbrainStatus(String key) {
+            return ok(key) ? FastBrainClient.status(MainActivity.this) : "not allowed";
         }
 
         /** The page reports the final reply to a spoken question (window.hermesVoiceAsk). Empty text = it failed. */

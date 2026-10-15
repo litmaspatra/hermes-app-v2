@@ -21,7 +21,7 @@ import {
 } from '../bridge'
 import { confirmDialog } from '../dialog'
 import { toast } from '../store'
-import { haptic, saveVoiceAliases, voiceAliases } from '../bridge'
+import { fastbrainStatus, haptic, neuralTtsStatus, setTtsVoice, testVoice, installedPets, installPet, petCatalog, selectPet, saveVoiceAliases, voiceAliases } from '../bridge'
 import { dynamicColorsOn, reduceEffectsOn, savedStyle, setDynamicColors, setReduceEffects, setStyle, type Style } from '../theme'
 import { Row, Section, Segmented, ToggleRow } from './ui'
 
@@ -144,6 +144,7 @@ export function IslandPage() {
               ))}
             </div>
           </Section>
+          <PetGallery />
           <Section title="Position" footer="Always just under the status bar or on the upper part of a side, never the lower part of the screen. Wander strolls between spots every half minute or so when it is just hanging around. Drag the pet anywhere (also over the area an app's drag-and-drop covers): it stays exactly where you drop it. Turn on “Snap to spots” to make it jump to the nearest spot instead.">
             <div className="pet-grid">
               {SPOTS.map(p => (
@@ -176,6 +177,60 @@ export function IslandPage() {
 }
 
 // ── Voice commands ──────────────────────────────────────────
+
+function PetGallery() {
+  const [q, setQ] = useState('')
+  const [list, setList] = useState<{ slug: string; name: string; url: string }[]>([])
+  const [mine, setMine] = useState<string[]>(() => installedPets())
+  const [busy, setBusy] = useState('')
+  const search = () => {
+    setBusy('search')
+    setTimeout(() => {
+      const r = petCatalog(q)
+      setList(r)
+      setBusy('')
+      if (!r.length) toast('No pets found (or no connection)', 'error')
+    }, 30)
+  }
+  const get = (p: { slug: string; url: string }) => {
+    setBusy(p.slug)
+    setTimeout(() => {
+      const err = installPet(p.slug, p.url)
+      setBusy('')
+      if (err) toast(`Couldn't install: ${err}`, 'error')
+      else {
+        setMine(installedPets())
+        toast('Pet installed', 'info')
+      }
+    }, 30)
+  }
+  return (
+    <Section title="Pets from AgentPets" footer="Pets are animated spritesheets from agentpets.dev (community made, MIT-licensed site). Search, tap to download one (a few hundred KB) and it becomes your pet. Nothing is bundled in the app.">
+      <div style={{ display: 'flex', gap: 8, padding: '0 4px 8px' }}>
+        <input className="input" value={q} placeholder="Search pets (name)" onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Enter' && search()} style={{ flex: 1 }} />
+        <button className="pet-card" onClick={search} disabled={busy === 'search'}>{busy === 'search' ? '…' : 'Search'}</button>
+      </div>
+      {mine.length > 0 && (
+        <div className="pet-grid">
+          {mine.map(sl => (
+            <button key={sl} className="pet-card" onClick={() => { haptic(); selectPet(sl) }}>
+              <span className="pet-name">{sl}</span>
+              <span className="pet-sub">Installed · tap to use</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="pet-grid">
+        {list.map(p => (
+          <button key={p.slug} className="pet-card" onClick={() => get(p)} disabled={busy === p.slug}>
+            <span className="pet-name">{p.name}</span>
+            <span className="pet-sub">{busy === p.slug ? 'Downloading…' : mine.includes(p.slug) ? 'Installed · tap to refresh' : 'Tap to download'}</span>
+          </button>
+        ))}
+      </div>
+    </Section>
+  )
+}
 
 function AliasEditor() {
   const [text, setText] = useState(() => voiceAliases())
@@ -219,6 +274,18 @@ export function VoiceCommandsPage() {
             <ToggleRow icon="🧠" tone="teal" title="Use FastBrain" on={s.voice_fastbrain} onChange={v => set('voice_fastbrain', v)} />
             <ToggleRow icon="💬" tone="blue" title="Ask Hermes what FastBrain can't do" on={s.voice_hermes} onChange={v => set('voice_hermes', v)} />
             <ToggleRow icon="🔁" tone="gold" title="Keep listening after Hermes answers" on={s.voice_follow} onChange={v => set('voice_follow', v)} />
+            <Row icon="🩺" tone="teal" title="Test FastBrain connection" onClick={() => toast(fastbrainStatus(), 'info')} />
+          </Section>
+          <Section title="Natural voice" footer="A neural voice (KittenTTS, about 25 MB) that runs on the phone next to FastBrain and speaks in short phrases with breaths, a slower softer pace for bad news and a lighter one for good news. If its server isn't running the phone's own voice is used. Setup: see the header of scripts/kitten-tts-server.py.">
+            <ToggleRow icon="🗣" tone="blue" title="Use the natural voice" on={s.voice_neural} onChange={v => set('voice_neural', v)} />
+            <div className="pet-grid">
+              {['expr-voice-2-f', 'expr-voice-2-m', 'expr-voice-3-f', 'expr-voice-3-m', 'expr-voice-4-f', 'expr-voice-4-m', 'expr-voice-5-f', 'expr-voice-5-m'].map(v => (
+                <button key={v} className={`pet-card${s.tts_voice === v ? ' on' : ''}`} onClick={() => { haptic(); setTtsVoice(v); set('voice_neural', true) }}>
+                  <span className="pet-name">{v.replace('expr-voice-', 'Voice ').replace('-f', ' · F').replace('-m', ' · M')}</span>
+                </button>
+              ))}
+            </div>
+            <Row icon="▶️" tone="teal" title="Test voice" onClick={() => { testVoice(); setTimeout(() => toast(neuralTtsStatus(), 'info'), 400) }} />
           </Section>
           <AliasEditor />
           <Section title="Language">

@@ -217,6 +217,7 @@ final class VoiceController {
         main.removeCallbacks(speechGuard);
         destroyRecognizer();
         if (tts != null && ttsReady) tts.stop();
+        if (neural != null) neural.stop();
         end();
     }
 
@@ -303,7 +304,7 @@ final class VoiceController {
     private void deliver(VoiceRouter.Result r, String text) {
         if (ui == null) return; // cancelled meanwhile
         if (r.toHermes) {
-            askHermes(r.hermesText);
+            askHermes(r.hermesText, r.command);
             return;
         }
         asked = r.confirm != null || r.fbConfirm ? r : null;
@@ -323,7 +324,7 @@ final class VoiceController {
     }
 
     /** Open questions go to Hermes, which can hold a conversation: its answer is read out, then it listens again. */
-    private void askHermes(String text) {
+    private void askHermes(String text, boolean command) {
         active = true;
         if (ui != null) ui.transcript(text + "\nThinking…");
         final boolean fresh = !hermesChat;
@@ -336,7 +337,7 @@ final class VoiceController {
                 return;
             }
             HistoryStore.append(svc, "voice", "", text, "hermes: answered");
-            if (svc.getSharedPreferences("hm", Context.MODE_PRIVATE).getBoolean("voice_follow", true)) converse = true;
+            if (!command && svc.getSharedPreferences("hm", Context.MODE_PRIVATE).getBoolean("voice_follow", true)) converse = true;
             String spoken = VoiceCommands.speakable(answer);
             if (ui != null) ui.transcript(text + "\n" + spoken);
             say(spoken, converse ? this::relisten : () -> {
@@ -388,7 +389,23 @@ final class VoiceController {
     private void say(String s, Runnable after) {
         afterSpeech = after;
         main.removeCallbacks(speechGuard);
-        main.postDelayed(speechGuard, 30_000); // never wait forever for a speech engine that stays silent
+        main.postDelayed(speechGuard, 60_000); // never wait forever for a speech engine that stays silent
+        if (s != null && !s.trim().isEmpty() && NeuralTts.enabled(svc)) {
+            if (neural == null) neural = new NeuralTts(svc);
+            final int id = ++speechId;
+            neural.speak(s, () -> {
+                if (id == speechId) speechDone();
+            }, () -> {
+                if (id == speechId) sysSay(s); // the natural-voice server isn't running: the phone's own voice
+            });
+            return;
+        }
+        sysSay(s);
+    }
+
+    private NeuralTts neural;
+
+    private void sysSay(String s) {
         if (ttsReady && tts != null) {
             speakNow(s);
             return;

@@ -5,7 +5,8 @@
 - **System island**: strictly opt-in (no chronometer / Live Update style unless the toggle is on).
 - **Music by voice**: FastBrain router first; if it doesn't take it, the request goes to Hermes (its pre-router: Gemini, Hindsight Lite, music helper); YouTube only if you say "youtube". Settings → Voice → Test FastBrain says what is wrong.
 - **Pets**: AgentPets spritesheets (8x9 grid) downloaded on demand; pets keep inside the screen, flush to edges/corners when dropped near them, step away from a system drag; vsync animation; Material You colours; iOS-style frosted island.
-- **Natural voice**: KittenTTS server + phrase planner (breaths, pace by mood); falls back to the phone's voice.
+- **Natural voice**: Piper server + phrase planner (breaths, pace by mood); in Settings → Voice; used for read-aloud and voice replies; falls back to the phone's voice.
+- **Fixes**: no window blur on the glass island (it blurred the whole screen), glass sheets opaque enough to read, AgentPets-only pets with a browsable catalogue and thumbnails (CDN 401 fixed with a browser identity, trusted hosts only), island follows work happening in the chat page.
 - **Icon**: pixelated and smaller.
 Not run on a phone.
 

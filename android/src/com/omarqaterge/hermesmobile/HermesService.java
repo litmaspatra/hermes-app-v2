@@ -1347,6 +1347,18 @@ public class HermesService extends Service {
         if (s != null) s.approvalAnsweredInApp(requestId, session);
     }
 
+    /** The chat page says a turn is running (or ended): the island and status follow it even if the plugin is silent. */
+    static void pageWorking(boolean working) {
+        HermesService s = instance;
+        if (s == null) return;
+        s.main.post(() -> {
+            try {
+                s.onEvent(new JSONObject().put("kind", "status").put("working", working).put("body", working ? "Working…" : "Ready").put("short", "Hermes"));
+            } catch (Exception ignored) {
+            }
+        });
+    }
+
     static void appVisibility(boolean visible) {
         HermesService s = instance;
         if (s != null) s.main.post(() -> s.onAppVisibility(visible));

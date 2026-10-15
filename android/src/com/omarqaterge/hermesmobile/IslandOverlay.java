@@ -584,20 +584,6 @@ final class IslandOverlay {
             }
             t.setBackground(pg);
         }
-        // glass: blur what is behind the island where the system allows it (Android 12+)
-        if (added && Build.VERSION.SDK_INT >= 31) {
-            boolean glass = "glass".equals(th) && full && !svc.getSharedPreferences("hm", Context.MODE_PRIVATE).getBoolean("reduce_effects", false);
-            int want = glass ? dp(24) : 0;
-            if (lp.getBlurBehindRadius() != want) {
-                lp.setBlurBehindRadius(want);
-                if (glass) lp.flags |= WindowManager.LayoutParams.FLAG_BLUR_BEHIND;
-                else lp.flags &= ~WindowManager.LayoutParams.FLAG_BLUR_BEHIND;
-                try {
-                    wm.updateViewLayout(root, lp);
-                } catch (Exception ignored) {
-                }
-            }
-        }
     }
 
     private int strokeFor(Mood m) {

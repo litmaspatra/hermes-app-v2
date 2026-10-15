@@ -1268,8 +1268,8 @@ public class MainActivity extends Activity {
 
         /** AgentPets catalogue as JSON [{slug,name,url}], filtered by `query` (empty on failure). Blocking. */
         @JavascriptInterface
-        public String petCatalog(String key, String query) {
-            return ok(key) ? PetSprites.catalog(query, 40) : "";
+        public String petCatalog(String key, String query, int offset) {
+            return ok(key) ? PetSprites.catalog(query, Math.max(0, offset), 24) : "";
         }
 
         /** Downloads a pet's spritesheet and makes it the pet. "" = done, otherwise what went wrong. Blocking. */
@@ -1295,6 +1295,12 @@ public class MainActivity extends Activity {
             HermesService.refreshIslandAsync();
         }
 
+        /** The chat page reports a running / finished turn. */
+        @JavascriptInterface
+        public void pageWorking(String key, boolean working) {
+            if (ok(key)) HermesService.pageWorking(working);
+        }
+
         /** Is the natural-voice server up? Plain words. Blocking. */
         @JavascriptInterface
         public String neuralTtsStatus(String key) {
@@ -1308,11 +1314,16 @@ public class MainActivity extends Activity {
             HermesService.sayTest();
         }
 
-        /** One of NeuralTts.VOICES. */
+        /** A Piper voice name (en_US-lessac-medium). */
         @JavascriptInterface
         public void setTtsVoice(String key, String voice) {
-            if (!ok(key)) return;
-            for (String v : NeuralTts.VOICES) if (v.equals(voice)) getSharedPreferences("hm", MODE_PRIVATE).edit().putString("tts_voice", voice).apply();
+            if (ok(key) && NeuralTts.validVoice(voice)) getSharedPreferences("hm", MODE_PRIVATE).edit().putString("tts_voice", voice).apply();
+        }
+
+        /** Voices installed on the Piper server, comma separated (empty if it isn't running). Blocking. */
+        @JavascriptInterface
+        public String ttsVoices(String key) {
+            return ok(key) ? NeuralTts.voices(MainActivity.this) : "";
         }
 
         /** Is the FastBrain bridge reachable? Plain words for Settings → Voice. */

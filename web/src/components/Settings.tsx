@@ -16,7 +16,7 @@ import { ScreenShell, Sheet, Status, useLoader } from './Screens'
 import { useBackHandler } from '../backstack'
 import { getLivePause, setLivePause } from '../live'
 import { Row, Section, SelectRow, Segmented, SliderRow, ToggleRow, type Option } from './ui'
-import { ApprovalsPage, IslandPage, StyleSection, VoiceCommandsPage } from './SettingsV2'
+import { ApprovalsPage, IslandPage, NaturalVoice, StyleSection, VoiceCommandsPage } from './SettingsV2'
 import { AccountsList } from './Connect'
 
 // ── shared ───────────────────────────────────────────────────
@@ -673,6 +673,7 @@ function VoiceSettings() {
         <SelectRow icon="🎙" tone="purple" title="Voice" options={voiceOptions} value={cfg.voice} placeholder="Default for my language" onChange={v => update({ voice: v })} />
         {engine && engine !== 'com.google.android.tts' && opener && <Row icon="↗" tone="blue" title={`Open ${engineLabel} to change its voice`} chevron onClick={() => opener(engine)} />}
       </Section>
+      <NaturalVoice />
       <Section title="Sound">
         <SliderRow icon="⏩" tone="blue" title="Speed" value={cfg.rate} min={0.5} max={2} step={0.05} format={v => `${v.toFixed(2)}×`} onChange={v => update({ rate: v })} />
         <SliderRow icon="🎚" tone="green" title="Pitch" value={cfg.pitch} min={0.5} max={2} step={0.05} format={v => v.toFixed(2)} onChange={v => update({ pitch: v })} />

@@ -187,7 +187,7 @@
   border: 1px solid rgba(255, 255, 255, 0.7);
   box-shadow: var(--shadow);
 }
-:root[data-style='glass'] .sheet { border-radius: 28px 28px 0 0; background: rgba(255, 255, 255, 0.72); border: 1px solid rgba(255, 255, 255, 0.8); }
+:root[data-style='glass'] .sheet { border-radius: 28px 28px 0 0; background: rgba(255, 255, 255, 0.95); border: 1px solid rgba(255, 255, 255, 0.8); }
 :root[data-style='glass'] .sheet-backdrop { background: rgba(40, 30, 90, 0.28); }
 :root[data-style='glass'] .drawer { background: rgba(255, 255, 255, 0.55); border-right: 1px solid rgba(255, 255, 255, 0.7); }
 /* Reduce effects: no blur; panels become nearly opaque so text stays readable. */
@@ -283,3 +283,5 @@
 .pet-card.on { border-color: var(--accent); }
 .pet-name { font-size: 0.95rem; font-weight: 700; }
 .pet-sub { font-size: 0.72rem; color: var(--dim); text-align: center; }
+
+.pet-thumb { display: block; width: 64px; height: 69px; border-radius: 8px; background-repeat: no-repeat; }

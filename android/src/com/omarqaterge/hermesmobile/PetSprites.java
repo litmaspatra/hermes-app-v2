@@ -39,6 +39,19 @@ final class PetSprites {
         return species != null && species.startsWith(PREFIX) && validSlug(species.substring(PREFIX.length()));
     }
 
+    /** Hosts AgentPets itself trusts for pet files (its own allowlist): nothing else is ever downloaded. */
+    private static final java.util.Set<String> HOSTS = new java.util.HashSet<>(java.util.Arrays.asList(
+            "pub-94495283df974cfea5e98d6a9e3fa462.r2.dev", "yu2vz9gndp.ufs.sh"));
+
+    static boolean trustedUrl(String url) {
+        try {
+            URL u = new URL(url);
+            return "https".equals(u.getProtocol()) && HOSTS.contains(u.getHost());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     static boolean validSlug(String s) {
         return s != null && s.matches("[a-z0-9][a-z0-9-]{0,59}");
     }
@@ -76,8 +89,12 @@ final class PetSprites {
         h.setConnectTimeout(8000);
         h.setReadTimeout(20000);
         h.setInstanceFollowRedirects(true);
+        // Without a browser-like identity the pet host answers 401 (its CDN refuses the default Android client).
+        h.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Mobile Safari/537.36 HermesMobile");
+        h.setRequestProperty("Accept", "*/*");
+        h.setRequestProperty("Referer", "https://agentpets.dev/");
         try {
-            if (h.getResponseCode() != 200) throw new Exception("HTTP " + h.getResponseCode());
+            if (h.getResponseCode() != 200) throw new Exception("HTTP " + h.getResponseCode() + " from " + h.getURL().getHost());
             java.io.ByteArrayOutputStream o = new java.io.ByteArrayOutputStream();
             try (InputStream in = h.getInputStream()) {
                 byte[] buf = new byte[16384];
@@ -94,18 +111,20 @@ final class PetSprites {
     }
 
     /** [{"slug","name","url"}] from AgentPets, `query` filters by name/slug; at most `limit` entries. */
-    static String catalog(String query, int limit) {
+    static String catalog(String query, int offset, int limit) {
         try {
             JSONObject m = new JSONObject(new String(get(MANIFEST, 12_000_000), "UTF-8"));
             JSONArray pets = m.optJSONArray("pets");
             JSONArray out = new JSONArray();
             String q = query == null ? "" : query.trim().toLowerCase(java.util.Locale.ROOT);
+            int skipped = 0;
             for (int i = 0; pets != null && i < pets.length() && out.length() < limit; i++) {
                 JSONObject p = pets.optJSONObject(i);
                 if (p == null) continue;
                 String slug = p.optString("slug"), name = p.optString("displayName", slug), url = p.optString("spritesheetUrl");
-                if (!validSlug(slug) || !url.startsWith("https://")) continue;
+                if (!validSlug(slug) || !trustedUrl(url)) continue;
                 if (!q.isEmpty() && !slug.contains(q) && !name.toLowerCase(java.util.Locale.ROOT).contains(q)) continue;
+                if (skipped++ < offset) continue;
                 out.put(new JSONObject().put("slug", slug).put("name", name).put("url", url));
             }
             return out.toString();
@@ -116,9 +135,15 @@ final class PetSprites {
 
     /** Downloads one pet's sheet. "" = installed, otherwise what went wrong. The URL must be the catalogue's https one. */
     static String install(Context c, String slug, String url) {
-        if (!validSlug(slug) || url == null || !url.startsWith("https://")) return "bad pet";
+        if (!validSlug(slug) || !trustedUrl(url)) return "not a trusted AgentPets file";
         try {
-            byte[] data = get(url, 8_000_000);
+            byte[] data;
+            try {
+                data = get(url, 8_000_000);
+            } catch (Exception first) { // the pet CDN rate-limits bursts: one patient retry
+                Thread.sleep(1500);
+                data = get(url, 8_000_000);
+            }
             Bitmap b = BitmapFactory.decodeByteArray(data, 0, data.length);
             if (b == null || b.getWidth() < COLS * 8 || b.getHeight() < ROWS * 8) return "not a pet spritesheet";
             File f = new File(dir(c), slug + ".img");

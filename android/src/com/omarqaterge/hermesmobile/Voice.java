@@ -174,11 +174,21 @@ final class Voice {
         if (text.length() > 40000) text = text.substring(0, 40000);
         applyConfig(cfg);
         final String t = text;
-        withTts(() -> {
+        final Runnable system = () -> withTts(() -> {
             configureTts();
             speakNow(t);
         });
+        if (NeuralTts.enabled(ctx)) {
+            // The natural voice (Piper) when its server is up; the phone's own voice when it isn't.
+            if (neural != null) neural.stop();
+            neural = new NeuralTts(ctx);
+            neural.speak(t, () -> js("tts-done", ""), system);
+            return;
+        }
+        system.run();
     }
+
+    private NeuralTts neural;
 
     /** Sends the installed engines and voices of `engine` to the page as JSON via 'voices'. */
     void listVoices(String cfg) {
@@ -244,6 +254,7 @@ final class Voice {
 
     void stopSpeaking() {
         pendingSpeech = null;
+        if (neural != null) neural.stop();
         if (tts != null) tts.stop();
         js("tts-done", "");
     }

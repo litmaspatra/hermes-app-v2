@@ -20,14 +20,19 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 /**
- * A natural voice from the local neural TTS server (scripts/kitten-tts-server.py, KittenTTS, runs next to FastBrain).
+ * A natural voice from the local Piper TTS server (scripts/piper-tts-server.py in the FastBrain repo, runs next to it).
  * The reply is cut into small pieces (ProsodyPlanner: a pace and a pause each); the next piece is synthesised while the
  * current one plays, so speech starts after the first sentence. If the server isn't there the caller falls back to the
  * phone's own voice. Same key as the FastBrain bridge, on 127.0.0.1.
  */
 final class NeuralTts {
     static final int PORT = 8766;
-    static final String[] VOICES = {"expr-voice-2-f", "expr-voice-2-m", "expr-voice-3-f", "expr-voice-3-m", "expr-voice-4-f", "expr-voice-4-m", "expr-voice-5-f", "expr-voice-5-m"};
+    static final String DEFAULT_VOICE = "en_US-lessac-medium";
+    private static final java.util.regex.Pattern VOICE = java.util.regex.Pattern.compile("^[a-z]{2,3}_[A-Za-z]{2,4}-[A-Za-z0-9_]+-(?:x_low|low|medium|high)$");
+
+    static boolean validVoice(String v) {
+        return v != null && VOICE.matcher(v).matches();
+    }
 
     private final Context app;
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -43,9 +48,8 @@ final class NeuralTts {
     }
 
     static String voice(Context c) {
-        String v = c.getSharedPreferences("hm", Context.MODE_PRIVATE).getString("tts_voice", VOICES[0]);
-        for (String x : VOICES) if (x.equals(v)) return v;
-        return VOICES[0];
+        String v = c.getSharedPreferences("hm", Context.MODE_PRIVATE).getString("tts_voice", DEFAULT_VOICE);
+        return validVoice(v) ? v : DEFAULT_VOICE;
     }
 
     private static final byte[] END = new byte[0], FAIL = new byte[0];
@@ -184,6 +188,31 @@ final class NeuralTts {
         }
     }
 
+    /** Voices installed on the server (Piper names like en_US-lessac-medium); empty if it isn't reachable. Blocking. */
+    static String voices(Context c) {
+        HttpURLConnection h = null;
+        try {
+            h = (HttpURLConnection) new URL("http://127.0.0.1:" + PORT + "/voices").openConnection();
+            h.setConnectTimeout(800);
+            h.setReadTimeout(3000);
+            h.setRequestProperty("X-Hermes-Mobile-Key", FastBrainClient.key(c));
+            if (h.getResponseCode() != 200) return "";
+            StringBuilder b = new StringBuilder();
+            try (InputStream in = h.getInputStream()) {
+                byte[] buf = new byte[4096];
+                int n;
+                while ((n = in.read(buf)) > 0 && b.length() < 8000) b.append(new String(buf, 0, n, StandardCharsets.UTF_8));
+            }
+            StringBuilder out = new StringBuilder();
+            for (String line : b.toString().split("\\s+")) if (validVoice(line)) out.append(out.length() > 0 ? "," : "").append(line);
+            return out.toString();
+        } catch (Exception e) {
+            return "";
+        } finally {
+            if (h != null) h.disconnect();
+        }
+    }
+
     /** Tells in words whether the server is up (Settings → Voice → Test voice). Blocking. */
     static String status(Context c) {
         HttpURLConnection h = null;
@@ -195,10 +224,10 @@ final class NeuralTts {
             int code = h.getResponseCode();
             if (code == 200) return "The natural voice is ready.";
             if (code == 403) return "The voice server refused the app's key. Open Hermes once, then restart it.";
-            if (code == 503) return "The voice server is loading its model. Try again in a moment.";
+            if (code == 503) return "The voice server is running but has no voice installed. Run setup-piper.sh again.";
             return "The voice server answered HTTP " + code + ".";
         } catch (java.net.ConnectException e) {
-            return "The voice server isn't running. In Termux: python ~/FastBrain/scripts/kitten-tts-server.py (see its header for installing).";
+            return "The voice server isn't running. In Termux / your Linux shell: bash ~/FastBrain/scripts/setup-piper.sh";
         } catch (Exception e) {
             return "Couldn't reach the voice server: " + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
         } finally {

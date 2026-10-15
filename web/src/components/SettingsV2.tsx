@@ -21,9 +21,9 @@ import {
 } from '../bridge'
 import { confirmDialog } from '../dialog'
 import { toast } from '../store'
-import { fastbrainStatus, haptic, neuralTtsStatus, setTtsVoice, testVoice, installedPets, installPet, petCatalog, selectPet, saveVoiceAliases, voiceAliases } from '../bridge'
+import { fastbrainStatus, haptic, installedPets, neuralTtsStatus, setTtsVoice, testVoice as testNaturalVoice, ttsVoices, installPet, petCatalog, selectPet, saveVoiceAliases, voiceAliases } from '../bridge'
 import { dynamicColorsOn, reduceEffectsOn, savedStyle, setDynamicColors, setReduceEffects, setStyle, type Style } from '../theme'
-import { Row, Section, Segmented, ToggleRow } from './ui'
+import { Row, Section, Segmented, SelectRow, ToggleRow } from './ui'
 
 function NoPhone() {
   return (
@@ -117,12 +117,6 @@ const SPOTS = [
   { id: 'mr', label: 'Right side', sub: 'Upper part of the side' }
 ]
 
-const PETS = [
-  { id: 'blob', label: 'Blob', sub: 'Bouncy mint slime' },
-  { id: 'mika', label: 'Mika', sub: 'Chibi girl, lavender hair' },
-  { id: 'cat', label: 'Cat', sub: 'Tail-wagging tabby' }
-]
-
 export function IslandPage() {
   const [s, set] = useNative()
   if (!hasNativeV2() || !s) return <NoPhone />
@@ -134,17 +128,7 @@ export function IslandPage() {
       </Section>
       {s.island && (
         <>
-          <Section title="Pet" footer="Your pet acts out what Hermes is doing: dozing, thinking, typing, startled by an approval, curious, cheering, worried. It looks the same in every theme.">
-            <div className="pet-grid">
-              {PETS.map(p => (
-                <button key={p.id} className={`pet-card${s.pet === p.id ? ' on' : ''}`} onClick={() => { haptic(); set('pet', p.id) }}>
-                  <span className="pet-name">{p.label}</span>
-                  <span className="pet-sub">{p.sub}</span>
-                </button>
-              ))}
-            </div>
-          </Section>
-          <PetGallery />
+          <PetGallery initial={s.pet.startsWith('ap-') ? s.pet.slice(3) : ''} />
           <Section title="Position" footer="Always just under the status bar or on the upper part of a side, never the lower part of the screen. Wander strolls between spots every half minute or so when it is just hanging around. Drag the pet anywhere (also over the area an app's drag-and-drop covers): it stays exactly where you drop it. Turn on “Snap to spots” to make it jump to the nearest spot instead.">
             <div className="pet-grid">
               {SPOTS.map(p => (
@@ -178,20 +162,49 @@ export function IslandPage() {
 
 // ── Voice commands ──────────────────────────────────────────
 
-function PetGallery() {
+export /** The natural voice (Piper, on the phone next to FastBrain): used for read-aloud and for spoken replies to the island. */
+function NaturalVoice() {
+  const [s, set] = useNative()
+  const [voices, setVoices] = useState<string[]>([])
+  const [status, setStatus] = useState('')
+  useEffect(() => {
+    setTimeout(() => {
+      setVoices(ttsVoices())
+      setStatus(neuralTtsStatus())
+    }, 50)
+  }, [])
+  if (!hasNativeV2() || !s) return null
+  const pretty = (v: string) => v.replace(/^([a-z]{2})_([A-Za-z]+)-/, '$1-$2 · ').replace(/-(x_low|low|medium|high)$/, ' ($1)').replace(/_/g, ' ')
+  return (
+    <Section title="Natural voice" footer={`${status || 'Checking…'} Piper is an open-source voice (20–65 MB per voice) that runs on the phone; it breathes between phrases and slows down for bad news. If its server isn't running the phone's own voice is used. Set it up once: bash ~/FastBrain/scripts/setup-piper.sh`}>
+      <ToggleRow icon="🗣" tone="blue" title="Use the natural voice" sub="Read-aloud and spoken replies" on={s.voice_neural} onChange={v => set('voice_neural', v)} />
+      {voices.length > 0 && (
+        <SelectRow icon="🎙" tone="purple" title="Natural voice" options={voices.map(v => ({ value: v, label: pretty(v) }))} value={s.tts_voice} placeholder="Choose" onChange={v => { setTtsVoice(v); set('voice_neural', true) }} />
+      )}
+      <Row icon="▶" tone="teal" title="Test natural voice" onClick={() => { testNaturalVoice(); setTimeout(() => setStatus(neuralTtsStatus()), 600) }} />
+    </Section>
+  )
+}
+
+/** The pet: only AgentPets pets (agentpets.dev). The first page of the catalogue shows at once; search narrows it. */
+function PetGallery({ initial }: { initial: string }) {
+  const [current, setCurrent] = useState(initial)
   const [q, setQ] = useState('')
   const [list, setList] = useState<{ slug: string; name: string; url: string }[]>([])
+  const [more, setMore] = useState(false)
   const [mine, setMine] = useState<string[]>(() => installedPets())
   const [busy, setBusy] = useState('')
-  const search = () => {
-    setBusy('search')
+  const load = (query: string, offset: number) => {
+    setBusy('list')
     setTimeout(() => {
-      const r = petCatalog(q)
-      setList(r)
+      const r = petCatalog(query, offset)
+      setList(old => (offset ? [...old, ...r] : r))
+      setMore(r.length >= 24)
       setBusy('')
-      if (!r.length) toast('No pets found (or no connection)', 'error')
+      if (!r.length && !offset) toast('No pets found (or no internet)', 'error')
     }, 30)
   }
+  useEffect(() => load('', 0), [])
   const get = (p: { slug: string; url: string }) => {
     setBusy(p.slug)
     setTimeout(() => {
@@ -200,35 +213,43 @@ function PetGallery() {
       if (err) toast(`Couldn't install: ${err}`, 'error')
       else {
         setMine(installedPets())
-        toast('Pet installed', 'info')
+        setCurrent(p.slug) // installPet already made it the pet
       }
     }, 30)
   }
+  const sheet = (url: string) => ({ backgroundImage: `url(${url})`, backgroundSize: '800% 900%', backgroundPosition: '0 0', imageRendering: 'pixelated' as const })
   return (
-    <Section title="Pets from AgentPets" footer="Pets are animated spritesheets from agentpets.dev (community made, MIT-licensed site). Search, tap to download one (a few hundred KB) and it becomes your pet. Nothing is bundled in the app.">
-      <div style={{ display: 'flex', gap: 8, padding: '0 4px 8px' }}>
-        <input className="input" value={q} placeholder="Search pets (name)" onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Enter' && search()} style={{ flex: 1 }} />
-        <button className="pet-card" onClick={search} disabled={busy === 'search'}>{busy === 'search' ? '…' : 'Search'}</button>
-      </div>
+    <>
       {mine.length > 0 && (
+        <Section title="Your pets">
+          <div className="pet-grid">
+            {mine.map(sl => (
+              <button key={sl} className={`pet-card${current === sl ? ' on' : ''}`} onClick={() => { haptic(); selectPet(sl); setCurrent(sl) }}>
+                <span className="pet-name">{sl}</span>
+                <span className="pet-sub">{current === sl ? 'In use' : 'Tap to use'}</span>
+              </button>
+            ))}
+          </div>
+        </Section>
+      )}
+      <Section title="Choose a pet" footer="Animated pets from agentpets.dev, made by the community. Tap one to download it (a few hundred KB) and use it. Nothing is bundled in the app.">
+        <div style={{ display: 'flex', gap: 8, padding: '0 4px 8px' }}>
+          <input className="input" value={q} placeholder="Search by name" onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Enter' && load(q, 0)} style={{ flex: 1 }} />
+          <button className="pet-card" onClick={() => load(q, 0)} disabled={busy === 'list'}>Search</button>
+        </div>
         <div className="pet-grid">
-          {mine.map(sl => (
-            <button key={sl} className="pet-card" onClick={() => { haptic(); selectPet(sl) }}>
-              <span className="pet-name">{sl}</span>
-              <span className="pet-sub">Installed · tap to use</span>
+          {list.map(p => (
+            <button key={p.slug} className="pet-card" onClick={() => get(p)} disabled={busy === p.slug}>
+              <span className="pet-thumb" style={sheet(p.url)} />
+              <span className="pet-name">{p.name}</span>
+              <span className="pet-sub">{busy === p.slug ? 'Downloading…' : mine.includes(p.slug) ? 'Installed' : 'Tap to get'}</span>
             </button>
           ))}
         </div>
-      )}
-      <div className="pet-grid">
-        {list.map(p => (
-          <button key={p.slug} className="pet-card" onClick={() => get(p)} disabled={busy === p.slug}>
-            <span className="pet-name">{p.name}</span>
-            <span className="pet-sub">{busy === p.slug ? 'Downloading…' : mine.includes(p.slug) ? 'Installed · tap to refresh' : 'Tap to download'}</span>
-          </button>
-        ))}
-      </div>
-    </Section>
+        {busy === 'list' && <div style={{ padding: 12, textAlign: 'center' }}>Loading…</div>}
+        {more && busy !== 'list' && <Row title="Show more" chevron onClick={() => load(q, list.length)} />}
+      </Section>
+    </>
   )
 }
 
@@ -275,17 +296,6 @@ export function VoiceCommandsPage() {
             <ToggleRow icon="💬" tone="blue" title="Ask Hermes what FastBrain can't do" on={s.voice_hermes} onChange={v => set('voice_hermes', v)} />
             <ToggleRow icon="🔁" tone="gold" title="Keep listening after Hermes answers" on={s.voice_follow} onChange={v => set('voice_follow', v)} />
             <Row icon="🩺" tone="teal" title="Test FastBrain connection" onClick={() => toast(fastbrainStatus(), 'info')} />
-          </Section>
-          <Section title="Natural voice" footer="A neural voice (KittenTTS, about 25 MB) that runs on the phone next to FastBrain and speaks in short phrases with breaths, a slower softer pace for bad news and a lighter one for good news. If its server isn't running the phone's own voice is used. Setup: see the header of scripts/kitten-tts-server.py.">
-            <ToggleRow icon="🗣" tone="blue" title="Use the natural voice" on={s.voice_neural} onChange={v => set('voice_neural', v)} />
-            <div className="pet-grid">
-              {['expr-voice-2-f', 'expr-voice-2-m', 'expr-voice-3-f', 'expr-voice-3-m', 'expr-voice-4-f', 'expr-voice-4-m', 'expr-voice-5-f', 'expr-voice-5-m'].map(v => (
-                <button key={v} className={`pet-card${s.tts_voice === v ? ' on' : ''}`} onClick={() => { haptic(); setTtsVoice(v); set('voice_neural', true) }}>
-                  <span className="pet-name">{v.replace('expr-voice-', 'Voice ').replace('-f', ' · F').replace('-m', ' · M')}</span>
-                </button>
-              ))}
-            </div>
-            <Row icon="▶️" tone="teal" title="Test voice" onClick={() => { testVoice(); setTimeout(() => toast(neuralTtsStatus(), 'info'), 400) }} />
           </Section>
           <AliasEditor />
           <Section title="Language">

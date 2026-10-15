@@ -43,11 +43,13 @@ interface AndroidBridge {
   clearHistory?(): void
   approvalAnswered?(requestId: string, session: string): void
   voiceReply?(text: string): void
+  pageWorking?(working: boolean): void
   fastbrainStatus?(): string
   neuralTtsStatus?(): string
+  ttsVoices?(): string
   testVoice?(): void
   setTtsVoice?(voice: string): void
-  petCatalog?(query: string): string
+  petCatalog?(query: string, offset: number): string
   installPet?(slug: string, url: string): string
   installedPets?(): string
   selectPet?(slug: string): void
@@ -341,9 +343,9 @@ export const approvalAnswered = (requestId: string, session: string): void => {
     /* older shell */
   }
 }
-export const petCatalog = (query: string): { slug: string; name: string; url: string }[] => {
+export const petCatalog = (query: string, offset = 0): { slug: string; name: string; url: string }[] => {
   try {
-    return JSON.parse(nat()?.petCatalog?.(query) || '[]')
+    return JSON.parse(nat()?.petCatalog?.(query, offset) || '[]')
   } catch {
     return []
   }
@@ -351,9 +353,24 @@ export const petCatalog = (query: string): { slug: string; name: string; url: st
 export const installPet = (slug: string, url: string): string => nat()?.installPet?.(slug, url) ?? 'not available'
 export const installedPets = (): string[] => (nat()?.installedPets?.() || '').split(',').filter(Boolean)
 export const selectPet = (slug: string): void => nat()?.selectPet?.(slug)
+export const ttsVoices = (): string[] => (nat()?.ttsVoices?.() || '').split(',').filter(Boolean)
 export const neuralTtsStatus = (): string => nat()?.neuralTtsStatus?.() ?? 'not available'
 export const testVoice = (): void => nat()?.testVoice?.()
 export const setTtsVoice = (v: string): void => nat()?.setTtsVoice?.(v)
+/** Tells the phone side that this chat is working (for the island and status), repeated while it lasts. */
+let workBeat: ReturnType<typeof setInterval> | undefined
+export const reportWorking = (working: boolean): void => {
+  const send = () => {
+    try {
+      nat()?.pageWorking?.(working)
+    } catch {
+      /* older shell */
+    }
+  }
+  send()
+  if (workBeat) clearInterval(workBeat)
+  workBeat = working ? setInterval(send, 15_000) : undefined
+}
 export const fastbrainStatus = (): string => nat()?.fastbrainStatus?.() ?? 'not available'
 export const voiceReply = (text: string): void => nat()?.voiceReply?.(text)
 export const voiceAliases = (): string => nat()?.voiceAliases?.() ?? ''

@@ -23,7 +23,7 @@ import type {
   TranscriptMessage,
   Usage
 } from '@hermes/shared/gateway-contract.generated'
-import { appInBackground, approvalAnswered, cancelNotification, notify, setLastChat, startHermes, wsUrl } from './bridge'
+import { appInBackground, approvalAnswered, cancelNotification, reportWorking, notify, setLastChat, startHermes, wsUrl } from './bridge'
 import {
   type ActiveSession,
   type Attachment,
@@ -1017,6 +1017,7 @@ client.onEvent((ev: GatewayEvent) => {
 
   switch (type) {
     case 'message.start':
+      reportWorking(true)
       stream = { chars: 0, ms: 0, last: 0, total: 0, start: performance.now() }
       updateActive(() => ({ running: true, tps: null }))
       break
@@ -1125,6 +1126,7 @@ client.onEvent((ev: GatewayEvent) => {
       loadSessionsSoon()
       break
     case 'message.complete': {
+      reportWorking(false)
       const p = payload as MessageCompletePayload
       updateActive(a => ({ items: a.items.filter(i => !(i.kind === 'tool' && i.status === 'generating')) }))
       canvasWritingDone()

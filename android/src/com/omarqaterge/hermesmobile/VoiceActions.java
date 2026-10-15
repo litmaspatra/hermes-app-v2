@@ -107,15 +107,6 @@ final class VoiceActions {
         return out;
     }
 
-    /** Contact names (for the speech recogniser to listen for); empty without the contacts permission. */
-    static List<String> contactNames(Context c) {
-        List<String> out = new ArrayList<>();
-        if (!has(c, Manifest.permission.READ_CONTACTS)) return out;
-        for (Person p : people(c)) if (!out.contains(p.name)) out.add(p.name);
-        for (String alias : VoiceAliases.load(c).keySet()) out.add(alias);
-        return out;
-    }
-
     /** Persons whose display name is exactly `name` (ignoring case and accents). */
     private static List<Person> named(Context c, String name) {
         List<Person> out = new ArrayList<>();

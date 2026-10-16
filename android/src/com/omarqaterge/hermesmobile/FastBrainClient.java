@@ -61,6 +61,15 @@ final class FastBrainClient {
         }
     }
 
+    /** Background, periodic: start the bridge / voice server again if either is down (and the person uses them). */
+    static void watch(Context c) {
+        final Context app = c.getApplicationContext();
+        if (!enabled(app) && !NeuralTts.enabled(app)) return;
+        new Thread(() -> {
+            if (status(app).startsWith("The FastBrain bridge isn't running") || NeuralTts.status(app).startsWith("The voice server isn't running")) startBridges(app);
+        }, "fb-watch").start();
+    }
+
     /** Background: if the bridge is down, start it now, so it is up by the time the command has been spoken. */
     static void warm(Context c) {
         final Context app = c.getApplicationContext();

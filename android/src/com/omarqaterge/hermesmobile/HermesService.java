@@ -101,6 +101,16 @@ public class HermesService extends Service {
         }
     }
 
+    // Android kills background processes in Termux now and then: look every few minutes whether the FastBrain bridge /
+    // voice server are still up and start them again if not (a localhost request, almost free).
+    private final Runnable bridgeWatch = new Runnable() {
+        @Override
+        public void run() {
+            FastBrainClient.watch(HermesService.this);
+            main.postDelayed(this, 8 * 60_000L);
+        }
+    };
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -108,6 +118,7 @@ public class HermesService extends Service {
         key = ensureKey();
         startForeground(STATUS_ID, statusNotification("Ready", null, false), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
         running = true;
+        main.postDelayed(bridgeWatch, 20_000);
         instance = this;
         new Thread(this::serve, "hermes-events").start();
         rearmWake();
@@ -234,6 +245,7 @@ public class HermesService extends Service {
 
     @Override
     public void onDestroy() {
+        main.removeCallbacks(bridgeWatch);
         running = false;
         instance = null;
         if (voice != null) voice.destroy();

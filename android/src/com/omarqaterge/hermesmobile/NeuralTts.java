@@ -69,6 +69,10 @@ final class NeuralTts {
         final BlockingQueue<Object[]> q = new ArrayBlockingQueue<>(2); // {pcm, rate, pauseMs}
         new Thread(() -> { // fetcher: stays one piece ahead of the player
             try {
+                if (!ensureUp()) { // down (Android killed it): start it and wait for it, instead of speaking in another voice
+                    q.put(new Object[] {FAIL, 0, 0});
+                    return;
+                }
                 for (int i = 0; i < plan.size() && !stopped; i++) {
                     ProsodyPlanner.Chunk c = plan.get(i);
                     byte[] wav = fetch(c.text, c.speed, voice);
@@ -86,7 +90,6 @@ final class NeuralTts {
                     Object[] it = q.poll(40, TimeUnit.SECONDS);
                     if (it == null || it[0] == FAIL) {
                         if (!spoke) {
-                            FastBrainClient.startBridges(app); // the voice server is down: start it for next time
                             finish(unavailable);
                             return;
                         }
@@ -100,6 +103,21 @@ final class NeuralTts {
             }
             finish(done);
         }, "tts-play").start();
+    }
+
+    /** Is the voice server answering? If not, start it (once a minute) and wait up to 12 s for it. Background only. */
+    private boolean ensureUp() {
+        if (status(app).startsWith("The natural voice is ready")) return true;
+        if (!FastBrainClient.startBridges(app)) return false;
+        for (int i = 0; i < 17 && !stopped; i++) {
+            try {
+                Thread.sleep(700);
+            } catch (InterruptedException e) {
+                return false;
+            }
+            if (status(app).startsWith("The natural voice is ready")) return true;
+        }
+        return false;
     }
 
     void stop() {

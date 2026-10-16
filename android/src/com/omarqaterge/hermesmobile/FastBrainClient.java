@@ -36,6 +36,39 @@ final class FastBrainClient {
         return c.getSharedPreferences("hermes", Context.MODE_PRIVATE).getString("event_key", "");
     }
 
+    private static long lastStart;
+
+    /**
+     * Starts the FastBrain bridge and the voice server inside Termux's Debian (scripts/start-app-bridges.sh), at most once
+     * a minute. Needs Termux's RUN_COMMAND permission, which the app already uses to share its key. True if it was started.
+     */
+    static synchronized boolean startBridges(Context c) {
+        if (System.currentTimeMillis() - lastStart < 60_000) return false;
+        if (c.checkSelfPermission("com.termux.permission.RUN_COMMAND") != android.content.pm.PackageManager.PERMISSION_GRANTED) return false;
+        lastStart = System.currentTimeMillis();
+        try {
+            android.content.Intent i = new android.content.Intent();
+            i.setClassName("com.termux", "com.termux.app.RunCommandService");
+            i.setAction("com.termux.RUN_COMMAND");
+            i.putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/sh");
+            i.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", new String[] {"-c",
+                    "proot-distro login debian -- bash -lc 'for d in ~/FastBrain ~/*/FastBrain; do [ -f $d/scripts/start-app-bridges.sh ] && exec bash $d/scripts/start-app-bridges.sh; done'"});
+            i.putExtra("com.termux.RUN_COMMAND_BACKGROUND", true);
+            c.startForegroundService(i);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** Background: if the bridge is down, start it now, so it is up by the time the command has been spoken. */
+    static void warm(Context c) {
+        final Context app = c.getApplicationContext();
+        new Thread(() -> {
+            if (enabled(app) && status(app).startsWith("The FastBrain bridge isn't running")) startBridges(app);
+        }, "fb-warm").start();
+    }
+
     /** What is wrong, in words (Settings → Voice → Test FastBrain). Blocking. */
     static String status(Context c) {
         HttpURLConnection h = null;

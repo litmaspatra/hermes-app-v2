@@ -1021,19 +1021,39 @@ public class HermesService extends Service {
     private final java.util.LinkedHashSet<String> answeredIds = new java.util.LinkedHashSet<>();
 
     /** The app's sheet answered this approval: forget it everywhere (list, notification, island) right now. */
-    void approvalAnsweredInApp(String requestId, String session) {
+    void approvalAnsweredInApp(String requestId, String session, String command, String description) {
         main.post(() -> {
             synchronized (HermesService.this) {
                 if (requestId != null && !requestId.isEmpty()) {
                     answeredIds.add(requestId);
                     while (answeredIds.size() > 100) answeredIds.remove(answeredIds.iterator().next());
                 }
+                // The page's session ids are not the plugin's ("session" and "key" differ), and the request id may be absent
+                // from the page's copy: so match by id when both have one, else by what is being asked (the command),
+                // else by chat. Wrong matches are worse than none, so the command must be non-empty and identical.
                 JSONObject hit = null;
                 for (JSONObject o : approvals) {
                     String rid = o.optString("request_id", "");
-                    if (requestId != null && !requestId.isEmpty() ? requestId.equals(rid) : sameSession(o, session)) {
+                    if (requestId != null && !requestId.isEmpty() && !rid.isEmpty()) {
+                        if (requestId.equals(rid)) {
+                            hit = o;
+                            break;
+                        }
+                        continue;
+                    }
+                    String cmd = o.optString("command", "").trim();
+                    if (!command.trim().isEmpty() && command.trim().equals(cmd)
+                            && (description.trim().isEmpty() || o.optString("what", "").trim().isEmpty() || description.trim().equals(o.optString("what", "").trim()))) {
                         hit = o;
                         break;
+                    }
+                }
+                if (hit == null && command.trim().isEmpty()) {
+                    for (JSONObject o : approvals) {
+                        if (sameSession(o, session)) {
+                            hit = o;
+                            break;
+                        }
                     }
                 }
                 if (hit != null) {
@@ -1342,9 +1362,9 @@ public class HermesService extends Service {
 
     /** The app came to the front or went away. Hidden with approvals waiting, their popups must exist (they were
      *  held back while the in-app sheet was showing); in front, the island steps aside. */
-    static void approvalAnswered(String requestId, String session) {
+    static void approvalAnswered(String requestId, String session, String command, String description) {
         HermesService s = instance;
-        if (s != null) s.approvalAnsweredInApp(requestId, session);
+        if (s != null) s.approvalAnsweredInApp(requestId, session, command, description);
     }
 
     /** The chat page says a turn is running (or ended): the island and status follow it even if the plugin is silent. */

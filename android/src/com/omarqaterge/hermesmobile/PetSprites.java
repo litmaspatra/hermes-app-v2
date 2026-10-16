@@ -84,15 +84,34 @@ final class PetSprites {
         return out;
     }
 
+    private static final String UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Mobile Safari/537.36 HermesMobile";
+
+    /** The pet host has refused some clients with 401, so try it three ways: a browser identity, none, then referer only. */
     private static byte[] get(String url, int max) throws Exception {
+        Exception last = null;
+        for (int mode = 0; mode < 3; mode++) {
+            try {
+                return getOnce(url, max, mode);
+            } catch (Exception e) {
+                last = e;
+                if (e.getMessage() == null || !e.getMessage().startsWith("HTTP 40")) break; // only auth/refusals are worth another try
+            }
+        }
+        throw last;
+    }
+
+    private static byte[] getOnce(String url, int max, int mode) throws Exception {
         HttpURLConnection h = (HttpURLConnection) new URL(url).openConnection();
         h.setConnectTimeout(8000);
         h.setReadTimeout(20000);
         h.setInstanceFollowRedirects(true);
-        // Without a browser-like identity the pet host answers 401 (its CDN refuses the default Android client).
-        h.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Mobile Safari/537.36 HermesMobile");
-        h.setRequestProperty("Accept", "*/*");
-        h.setRequestProperty("Referer", "https://agentpets.dev/");
+        if (mode == 0) {
+            h.setRequestProperty("User-Agent", UA);
+            h.setRequestProperty("Accept", "*/*");
+            h.setRequestProperty("Referer", "https://agentpets.dev/");
+        } else if (mode == 2) {
+            h.setRequestProperty("Referer", "https://agentpets.dev/");
+        }
         try {
             if (h.getResponseCode() != 200) throw new Exception("HTTP " + h.getResponseCode() + " from " + h.getURL().getHost());
             java.io.ByteArrayOutputStream o = new java.io.ByteArrayOutputStream();
@@ -108,6 +127,25 @@ final class PetSprites {
         } finally {
             h.disconnect();
         }
+    }
+
+    /** A pet sheet the person picked from their own files (downloaded in a browser): same checks, no network. */
+    static String importSheet(Context c, String name, byte[] data) {
+        String slug = name == null ? "" : name.toLowerCase(java.util.Locale.ROOT).replaceAll("\\.[a-z0-9]+$", "").replaceAll("[^a-z0-9]+", "-").replaceAll("^-+|-+$", "");
+        if (slug.length() > 60) slug = slug.substring(0, 60);
+        if (!validSlug(slug)) slug = "my-pet";
+        if (data == null || data.length > 10_000_000) return "file too large";
+        Bitmap b = BitmapFactory.decodeByteArray(data, 0, data.length);
+        if (b == null || b.getWidth() < COLS * 8 || b.getHeight() < ROWS * 8) return "not a pet spritesheet (8 columns x 9 rows)";
+        try (FileOutputStream o = new FileOutputStream(new File(dir(c), slug + ".img"))) {
+            o.write(data);
+        } catch (Exception e) {
+            return "couldn't save";
+        }
+        synchronized (PetSprites.class) {
+            cache.put(slug, b);
+        }
+        return "";
     }
 
     /** [{"slug","name","url"}] from AgentPets, `query` filters by name/slug; at most `limit` entries. */

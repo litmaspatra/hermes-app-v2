@@ -86,6 +86,7 @@ final class NeuralTts {
                     Object[] it = q.poll(40, TimeUnit.SECONDS);
                     if (it == null || it[0] == FAIL) {
                         if (!spoke) {
+                            FastBrainClient.startBridges(app); // the voice server is down: start it for next time
                             finish(unavailable);
                             return;
                         }

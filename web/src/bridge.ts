@@ -41,7 +41,7 @@ interface AndroidBridge {
   testCommand?(command: string, rulesJson: string): string
   history?(): string
   clearHistory?(): void
-  approvalAnswered?(requestId: string, session: string): void
+  approvalAnswered?(requestId: string, session: string, command: string, description: string): void
   voiceReply?(text: string): void
   pageWorking?(working: boolean): void
   fastbrainStatus?(): string
@@ -51,6 +51,7 @@ interface AndroidBridge {
   setTtsVoice?(voice: string): void
   petCatalog?(query: string, offset: number): string
   installPet?(slug: string, url: string): string
+  importPet?(name: string, base64: string): string
   installedPets?(): string
   selectPet?(slug: string): void
   voiceAliases?(): string
@@ -336,9 +337,9 @@ export function setNative(name: string, value: string | number | boolean): void 
     /* older shell */
   }
 }
-export const approvalAnswered = (requestId: string, session: string): void => {
+export const approvalAnswered = (requestId: string, session: string, command = '', description = ''): void => {
   try {
-    nat()?.approvalAnswered?.(requestId, session)
+    nat()?.approvalAnswered?.(requestId, session, command, description)
   } catch {
     /* older shell */
   }
@@ -351,6 +352,7 @@ export const petCatalog = (query: string, offset = 0): { slug: string; name: str
   }
 }
 export const installPet = (slug: string, url: string): string => nat()?.installPet?.(slug, url) ?? 'not available'
+export const importPet = (name: string, base64: string): string => nat()?.importPet?.(name, base64) ?? 'not available'
 export const installedPets = (): string[] => (nat()?.installedPets?.() || '').split(',').filter(Boolean)
 export const selectPet = (slug: string): void => nat()?.selectPet?.(slug)
 export const ttsVoices = (): string[] => (nat()?.ttsVoices?.() || '').split(',').filter(Boolean)

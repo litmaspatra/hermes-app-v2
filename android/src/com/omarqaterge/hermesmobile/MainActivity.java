@@ -1261,9 +1261,10 @@ public class MainActivity extends Activity {
 
         /** The in-app sheet answered an approval: the service must stop asking about it (no second notification). */
         @JavascriptInterface
-        public void approvalAnswered(String key, String requestId, String session) {
+        public void approvalAnswered(String key, String requestId, String session, String command, String description) {
             if (!ok(key)) return;
-            HermesService.approvalAnswered(requestId == null ? "" : requestId, session == null ? "" : session);
+            HermesService.approvalAnswered(requestId == null ? "" : requestId, session == null ? "" : session,
+                    command == null ? "" : command, description == null ? "" : description);
         }
 
         /** AgentPets catalogue as JSON [{slug,name,url}], filtered by `query` (empty on failure). Blocking. */
@@ -1279,6 +1280,25 @@ public class MainActivity extends Activity {
             String err = PetSprites.install(MainActivity.this, slug, url);
             if (err.isEmpty()) selectPet(key, slug);
             return err;
+        }
+
+        /** A spritesheet the person picked from their files (base64), made the pet. "" = done, else what is wrong. */
+        @JavascriptInterface
+        public String importPet(String key, String name, String base64) {
+            if (!ok(key) || base64 == null || base64.length() > 14_000_000) return "not allowed";
+            try {
+                byte[] data = android.util.Base64.decode(base64, android.util.Base64.DEFAULT);
+                String err = PetSprites.importSheet(MainActivity.this, name, data);
+                if (!err.isEmpty()) return err;
+                String slug = PetSprites.installed(MainActivity.this).isEmpty() ? "" : null;
+                for (String sl : PetSprites.installed(MainActivity.this)) {
+                    if (name != null && name.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]+", "-").contains(sl)) slug = sl;
+                }
+                if (slug != null && !slug.isEmpty()) selectPet(key, slug);
+                return "";
+            } catch (Exception e) {
+                return "couldn't read that file";
+            }
         }
 
         /** Installed AgentPets slugs, comma separated. */

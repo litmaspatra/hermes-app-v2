@@ -1,5 +1,10 @@
 # Hermes Mobile v2: report
 
+## v2.6
+- **Approvals**: an in-app answer is now matched to the island's copy by request id, else by the command text (the page's and the plugin's session ids differ, which is why answered approvals kept coming back).
+- **FastBrain/Piper bridges**: the scripts read the app's key from Termux's absolute path (as the plugin does; the home-folder default was wrong inside proot), and the app starts them itself (`scripts/start-app-bridges.sh` via Termux RUN_COMMAND) when a voice command finds them down. Piper finds voices in the usual folders (`~/piper-voices`, `~/.hermes/cache/piper-voices`, `~/FastBrain/piper-voices/*`).
+- **Pets**: three download attempts, plus Import-a-file when the pet host refuses.
+
 ## v2.5
 - **Approvals**: the plugin now says exactly WHICH request closed (it compares what it announced with what Hermes still has pending), stamps events with the time Hermes asked, and removes its own Termux fallback notification; the app closes by request id, remembers closed ids so a late event can't re-open one, and ignores approvals past their deadline. Redeploy `hermes-plugin/hermes-mobile` to Hermes as well as the APK.
 - **System island**: strictly opt-in (no chronometer / Live Update style unless the toggle is on).

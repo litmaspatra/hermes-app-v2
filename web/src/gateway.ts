@@ -871,7 +871,7 @@ export function answerRequest(req: ServerRequest, result: Record<string, unknown
   if (req.method === 'approval') {
     // Tell the phone side now, so the island and notifications stop asking about it when the app goes to the background.
     const p = req.params as Record<string, unknown>
-    approvalAnswered(String(p.request_id || ''), String(p.session_id || ''))
+    approvalAnswered(String(p.request_id || ''), String(p.session_id || ''), String(p.command || ''), String(p.description || ''))
   }
   cancelNotification(`req-${req.id}`)
   setState(s => ({ requests: s.requests.filter(r => r.id !== req.id) }))

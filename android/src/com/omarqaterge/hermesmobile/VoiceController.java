@@ -140,6 +140,7 @@ final class VoiceController {
         silent = 0;
         asked = null;
         hermesChat = false;
+        FastBrainClient.warm(svc);
         VoiceActions.warm(svc); // read the contacts now, so the first name is matched at once
         buzz();
         ui.transcript("");
@@ -326,7 +327,7 @@ final class VoiceController {
     /** Open questions go to Hermes, which can hold a conversation: its answer is read out, then it listens again. */
     private void askHermes(String text, boolean command) {
         active = true;
-        if (ui != null) ui.transcript(text + "\nThinking…");
+        if (ui != null) ui.transcript(text + (command ? "\nOn it…" : "\nThinking…"));
         final boolean fresh = !hermesChat;
         hermesChat = true;
         svc.askHermes(text, fresh, answer -> {

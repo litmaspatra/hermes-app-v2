@@ -21,7 +21,7 @@ import {
 } from '../bridge'
 import { confirmDialog } from '../dialog'
 import { toast } from '../store'
-import { fastbrainStatus, haptic, installedPets, neuralTtsStatus, setTtsVoice, testVoice as testNaturalVoice, ttsVoices, installPet, petCatalog, selectPet, saveVoiceAliases, voiceAliases } from '../bridge'
+import { fastbrainStatus, haptic, importPet, installedPets, neuralTtsStatus, setTtsVoice, testVoice as testNaturalVoice, ttsVoices, installPet, petCatalog, selectPet, saveVoiceAliases, voiceAliases } from '../bridge'
 import { dynamicColorsOn, reduceEffectsOn, savedStyle, setDynamicColors, setReduceEffects, setStyle, type Style } from '../theme'
 import { Row, Section, Segmented, SelectRow, ToggleRow } from './ui'
 
@@ -247,6 +247,29 @@ function PetGallery({ initial }: { initial: string }) {
           ))}
         </div>
         {busy === 'list' && <div style={{ padding: 12, textAlign: 'center' }}>Loading…</div>}
+        <label className="pet-card" style={{ display: 'block', margin: '8px 4px', cursor: 'pointer' }}>
+          <span className="pet-name">Import a pet file</span>
+          <span className="pet-sub">If downloading fails: save the pet's spritesheet from agentpets.dev in your browser, then pick it here</span>
+          <input
+            type="file"
+            accept="image/*"
+            style={{ display: 'none' }}
+            onChange={e => {
+              const f = e.target.files?.[0]
+              if (!f) return
+              const r = new FileReader()
+              r.onload = () => {
+                const err = importPet(f.name, String(r.result).split(',')[1] || '')
+                if (err) toast(`Couldn't import: ${err}`, 'error')
+                else {
+                  setMine(installedPets())
+                  toast('Pet imported', 'info')
+                }
+              }
+              r.readAsDataURL(f)
+            }}
+          />
+        </label>
         {more && busy !== 'list' && <Row title="Show more" chevron onClick={() => load(q, list.length)} />}
       </Section>
     </>

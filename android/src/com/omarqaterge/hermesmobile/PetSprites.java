@@ -183,7 +183,7 @@ final class PetSprites {
     }
 
     /** Checks and stores a sheet. "" = installed, otherwise what is wrong with it. */
-    private static String save(Context c, String slug, byte[] data) {
+    static String save(Context c, String slug, byte[] data) {
         Bitmap b = data == null ? null : BitmapFactory.decodeByteArray(data, 0, data.length);
         if (b == null || b.getWidth() < COLS * 8 || b.getHeight() < ROWS * 8) return "not a pet spritesheet";
         try (FileOutputStream o = new FileOutputStream(new File(dir(c), slug + ".img"))) {

@@ -52,6 +52,7 @@ interface AndroidBridge {
   petCatalog?(query: string, offset: number): string
   installPet?(slug: string, url: string): string
   importPet?(name: string, base64: string): string
+  savePetSheet?(slug: string, base64: string, select: boolean): string
   installedPets?(): string
   selectPet?(slug: string): void
   voiceAliases?(): string
@@ -356,6 +357,7 @@ export const petCatalog = (query: string, offset = 0): { slug: string; name: str
   }
 }
 export const installPet = (slug: string, url: string): string => nat()?.installPet?.(slug, url) ?? 'not available'
+export const savePetSheet = (slug: string, base64: string, select: boolean): string => nat()?.savePetSheet?.(slug, base64, select) ?? 'not available'
 export const importPet = (name: string, base64: string): string => nat()?.importPet?.(name, base64) ?? 'not available'
 export const installedPets = (): string[] => (nat()?.installedPets?.() || '').split(',').filter(Boolean)
 export const selectPet = (slug: string): void => nat()?.selectPet?.(slug)

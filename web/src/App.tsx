@@ -25,6 +25,7 @@ import { dotState, startHealthPolling, checkHealth } from './health'
 import { SettingsScreen } from './components/Settings'
 import { SetupScreen, watchFirstRun } from './components/Setup'
 import { autoDoctor } from './components/Doctor'
+import { autoPet } from './pets'
 import { WelcomeScreen, checkFirstRun } from './components/Connect'
 import { BotsScreen } from './components/Bots'
 import { CronScreen, FilesScreen, HubScreen, MemoryScreen, ProjectsScreen, SkillsScreen } from './components/Screens'
@@ -596,6 +597,9 @@ export function App() {
     if (!screen && getState().screenBack) setState({ screenBack: null })
   }, [screen])
   useEffect(() => watchFirstRun(conn, () => setState({ screen: 'setup' })), [conn])
+  useEffect(() => {
+    if (conn === 'open') void autoPet()
+  }, [conn])
   useEffect(() => autoDoctor(), []) // first launch: FastBrain, MiniLM, Piper + voices get installed by themselves
   useEffect(() => {
     // Health poll starts once connected; each reconnect re-checks so the dot is current.

@@ -1273,6 +1273,19 @@ public class MainActivity extends Activity {
             return ok(key) ? PetSprites.catalog(MainActivity.this, query, Math.max(0, offset), 24) : "";
         }
 
+        /** A pet sheet Hermes downloaded for us (its petdex support), handed over as base64; stored, and made the pet if asked. "" = done. */
+        @JavascriptInterface
+        public String savePetSheet(String key, String slug, String base64, boolean select) {
+            if (!ok(key) || base64 == null || base64.length() > 14_000_000 || slug == null || !slug.matches("[a-z0-9][a-z0-9-]{0,59}")) return "not allowed";
+            try {
+                String err = PetSprites.save(MainActivity.this, slug, android.util.Base64.decode(base64, android.util.Base64.DEFAULT));
+                if (err.isEmpty() && select) selectPet(key, slug);
+                return err;
+            } catch (Exception e) {
+                return "couldn't read the sheet";
+            }
+        }
+
         /** Downloads a pet's spritesheet and makes it the pet. "" = done, otherwise what went wrong. Blocking. */
         @JavascriptInterface
         public String installPet(String key, String slug, String url) {

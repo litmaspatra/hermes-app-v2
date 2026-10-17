@@ -22,6 +22,7 @@ import {
 import { confirmDialog } from '../dialog'
 import { toast } from '../store'
 import { DoctorPanel } from './Doctor'
+import { installViaHermes } from '../pets'
 import { memoryAliases, fastbrainStatus, haptic, importPet, installedPets, neuralTtsStatus, setTtsVoice, testVoice as testNaturalVoice, ttsVoices, installPet, petCatalog, selectPet, saveVoiceAliases, voiceAliases } from '../bridge'
 import { dynamicColorsOn, reduceEffectsOn, savedStyle, setDynamicColors, setReduceEffects, setStyle, type Style } from '../theme'
 import { Row, Section, Segmented, SelectRow, ToggleRow } from './ui'
@@ -177,7 +178,7 @@ function NaturalVoice() {
   if (!hasNativeV2() || !s) return null
   const pretty = (v: string) => v.replace(/^([a-z]{2})_([A-Za-z]+)-/, '$1-$2 · ').replace(/-(x_low|low|medium|high)$/, ' ($1)').replace(/_/g, ' ')
   return (
-    <Section title="Natural voice" footer={`${status || 'Checking…'} Piper is an open-source voice (20–65 MB per voice) that runs on the phone; it breathes between phrases and slows down for bad news. If its server isn't running the phone's own voice is used. Set it up once: bash ~/FastBrain/scripts/setup-piper.sh`}>
+    <Section title="Natural voice" footer={`${status || 'Checking…'} Piper is an open-source voice (20–65 MB per voice) that runs on the phone; it breathes between phrases and slows down for bad news. If its server isn't running the phone's own voice is used. The Voice and brain doctor (Voice commands page) installs it and four voices by itself.`}>
       <ToggleRow icon="🗣" tone="blue" title="Use the natural voice" sub="Read-aloud and spoken replies" on={s.voice_neural} onChange={v => set('voice_neural', v)} />
       {voices.length > 0 && (
         <SelectRow icon="🎙" tone="purple" title="Natural voice" options={voices.map(v => ({ value: v, label: pretty(v) }))} value={s.tts_voice} placeholder="Choose" onChange={v => { setTtsVoice(v); set('voice_neural', true) }} />
@@ -208,13 +209,14 @@ function PetGallery({ initial }: { initial: string }) {
   useEffect(() => load('', 0), [])
   const get = (p: { slug: string; url: string }) => {
     setBusy(p.slug)
-    setTimeout(() => {
-      const err = installPet(p.slug, p.url)
+    setTimeout(async () => {
+      let err = installPet(p.slug, p.url)
+      if (err) err = await installViaHermes(p.slug) // the phone can't reach the pet CDN: Hermes installs it and sends the sheet
       setBusy('')
       if (err) toast(`Couldn't install: ${err}`, 'error')
       else {
         setMine(installedPets())
-        setCurrent(p.slug) // installPet already made it the pet
+        setCurrent(p.slug) // already made it the pet
       }
     }, 30)
   }
@@ -316,7 +318,7 @@ export function VoiceCommandsPage() {
             <ToggleRow icon="📞" tone="green" title="Allow calls" on={s.voice_calls_locked} onChange={v => set('voice_calls_locked', v)} />
             <ToggleRow icon="💬" tone="blue" title="Allow sending messages" on={s.voice_msgs_locked} onChange={v => set('voice_msgs_locked', v)} />
           </Section>
-          <Section title="Smarter voice" footer="Commands go to FastBrain on the phone for music, apps, aliases and more; calls and messages match your contacts here first, so they start at once and understand misheard names. Anything else is asked to Hermes. Say “let's talk” to keep a conversation going (it listens again after each answer until you say “stop”). Needs scripts/fastbrain-router-tcp.py running in Termux for FastBrain.">
+          <Section title="Smarter voice" footer="Commands go to FastBrain on the phone for music, apps, aliases and more; calls and messages match your contacts here first, so they start at once and understand misheard names. Anything else is asked to Hermes. Say “let's talk” to keep a conversation going (it listens again after each answer until you say “stop”). FastBrain is kept running by Hermes' helper, even with the app closed.">
             <ToggleRow icon="🧠" tone="teal" title="Use FastBrain" on={s.voice_fastbrain} onChange={v => set('voice_fastbrain', v)} />
             <ToggleRow icon="💬" tone="blue" title="Ask Hermes what FastBrain can't do" on={s.voice_hermes} onChange={v => set('voice_hermes', v)} />
             <ToggleRow icon="🔁" tone="gold" title="Keep listening after Hermes answers" on={s.voice_follow} onChange={v => set('voice_follow', v)} />

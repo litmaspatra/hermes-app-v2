@@ -24,6 +24,8 @@ KS="${KEYSTORE:-$HOME/.android/hermes-mobile.keystore}"  # CI passes the release
 ( cd ../web && npx vite build >/dev/null )
 mkdir -p assets/www
 cp ../web/dist/index.html assets/www/index.html
+# the phone-side helper ships inside the app: the app writes it into Debian itself, no plugin redeploy needed
+cp ../hermes-plugin/hermes-mobile/services.py assets/services.py
 
 rm -rf build && mkdir -p build/gen build/classes build/dex
 

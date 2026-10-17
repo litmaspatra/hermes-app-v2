@@ -95,11 +95,23 @@ final class Companion {
             i.setClassName("com.termux", "com.termux.app.RunCommandService");
             i.setAction("com.termux.RUN_COMMAND");
             i.putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/sh");
-            String inDebian = "f=$(ls ~/.hermes/plugins/hermes-mobile/services.py ~/.hermes/plugins/*/services.py 2>/dev/null | head -1); "
-                    + "if [ -n \"$f\" ]; then exec python3 \"$f\" serve; fi; "
-                    + "for d in ~/FastBrain ~/*/FastBrain; do [ -f $d/scripts/start-app-bridges.sh ] && exec bash $d/scripts/start-app-bridges.sh; done";
+            // The helper travels inside the app: write it into Debian's /root/.hermes-mobile (no plugin redeploy needed), then run it
+            // as the long-lived foreground process of that Debian session.
+            byte[] src;
+            try (InputStream in = c.getAssets().open("services.py")) {
+                ByteArrayOutputStream o = new ByteArrayOutputStream();
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = in.read(buf)) > 0) o.write(buf, 0, n);
+                src = o.toByteArray();
+            }
+            String b64 = android.util.Base64.encodeToString(src, android.util.Base64.NO_WRAP);
+            String d = "/data/data/com.termux/files/usr/var/lib/proot-distro/installed-rootfs/debian/root/.hermes-mobile";
+            String inDebian = "exec python3 /root/.hermes-mobile/services.py serve";
             i.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", new String[] {"-c",
-                    "[ -x ~/bin/hermes-services ] && (~/bin/hermes-services >/dev/null 2>&1 &); proot-distro login debian -- bash -lc '" + inDebian.replace("'", "'\\''") + "'"});
+                    "mkdir -p " + d + " && echo '" + b64 + "' | base64 -d > " + d + "/services.py.new && mv " + d + "/services.py.new " + d + "/services.py; "
+                            + "[ -x ~/bin/hermes-services ] && (~/bin/hermes-services >/dev/null 2>&1 &); "
+                            + "proot-distro login debian -- bash -lc '" + inDebian + "'"});
             i.putExtra("com.termux.RUN_COMMAND_BACKGROUND", true);
             c.startForegroundService(i);
             return true;

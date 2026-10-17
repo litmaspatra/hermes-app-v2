@@ -32,6 +32,8 @@ final class VoiceRouter {
         boolean toHermes;                    // hand the sentence to Hermes
         String hermesText = "";
         VoiceCommands.Command confirm;       // a guess to confirm: run this on "yes"
+        List<VoiceCommands.Command> options; // "Which one: A or B?": the answer picks one of these
+        List<String> labels;                 // what each option was called in the question
         String heard;                        // what was said for it, to remember as an alias after "yes"
         boolean fbConfirm;                   // FastBrain asked "Did you mean ...?": send it the yes / no
         boolean command;                     // a task for Hermes (play a song), not a chat: no conversation afterwards
@@ -110,6 +112,8 @@ final class VoiceRouter {
                 r.reply = o.reply;
                 r.confirm = o.confirm;
                 r.heard = o.heard;
+                r.options = o.options;
+                r.labels = o.labels;
                 return r;
             }
             case MUSIC_PLAY:
@@ -164,13 +168,7 @@ final class VoiceRouter {
     static Result viaFastBrain(Context c, String text, boolean locked) {
         if (!FastBrainClient.enabled(c)) return null;
         FastBrainClient.Reply peek = FastBrainClient.post(c, text, false, 4000);
-        if (!peek.reachable && FastBrainClient.startBridges(c)) { // the bridge was down: start it, give it a moment, ask again
-            try {
-                Thread.sleep(4000);
-            } catch (InterruptedException ignored) {
-            }
-            peek = FastBrainClient.post(c, text, false, 4000);
-        }
+        if (!peek.reachable && Companion.ensure(c, 10_000)) peek = FastBrainClient.post(c, text, false, 4000); // the bridge was down: bring it up, ask again
         if (!peek.reachable) return null;
         JSONObject p = peek.payload;
         String skill = p.optString("skill", "");

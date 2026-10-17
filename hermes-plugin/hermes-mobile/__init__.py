@@ -608,7 +608,16 @@ def _canvas_prompt(info) -> str:
         return ""
 
 
+def _services():
+    """Keeps FastBrain's bridge, Piper, MiniLM and the app's control port alive (and installs what is missing)."""
+    return _load("hm_services", "services.py")
+
+
 def register(ctx):
+    try:
+        _services().start()  # runs in Hermes' own long-lived process, so closing the app can't take the voice stack down
+    except Exception as e:
+        _dbg(f"services supervisor not started: {type(e).__name__}: {e}")
     try:
         _checkpoints().install_git_env_shim()
     except Exception as e:

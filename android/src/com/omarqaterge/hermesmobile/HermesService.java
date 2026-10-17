@@ -101,15 +101,37 @@ public class HermesService extends Service {
         }
     }
 
-    // Android kills background processes in Termux now and then: look every few minutes whether the FastBrain bridge /
-    // voice server are still up and start them again if not (a localhost request, almost free).
+    // Look every 90 s whether the companion (and with it the FastBrain bridge / voice server) is still up and start it again if
+    // not (a localhost request, almost free). It lives in Hermes' own process, so closing the app does not stop it.
     private final Runnable bridgeWatch = new Runnable() {
         @Override
         public void run() {
             FastBrainClient.watch(HermesService.this);
-            main.postDelayed(this, 8 * 60_000L);
+            autoPet();
+            main.postDelayed(this, 90_000L);
         }
     };
+
+    private final java.util.concurrent.atomic.AtomicBoolean petBusy = new java.util.concurrent.atomic.AtomicBoolean();
+    private int petTries;
+
+    /** No pet installed yet: fetch the first one that downloads (no choosing, no spritesheet to set up), a few tries. The drawn blob shows meanwhile. */
+    void autoPet() {
+        if (petTries >= 8 || !PetSprites.installed(this).isEmpty() || !petBusy.compareAndSet(false, true)) return;
+        petTries++;
+        new Thread(() -> {
+            try {
+                String slug = PetSprites.autoInstall(this);
+                android.content.SharedPreferences sp = getSharedPreferences("hm", MODE_PRIVATE);
+                if (!slug.isEmpty() && "blob".equals(sp.getString("pet", "blob"))) {
+                    sp.edit().putString("pet", PetSprites.PREFIX + slug).apply();
+                    refreshIslandAsync();
+                }
+            } finally {
+                petBusy.set(false);
+            }
+        }, "pet-auto").start();
+    }
 
     @Override
     public void onCreate() {

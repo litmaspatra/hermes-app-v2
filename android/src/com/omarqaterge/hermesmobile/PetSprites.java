@@ -149,7 +149,18 @@ final class PetSprites {
     }
 
     /** [{"slug","name","url"}] from AgentPets, `query` filters by name/slug; at most `limit` entries. */
-    static String catalog(String query, int offset, int limit) {
+    static String catalog(Context c, String query, int offset, int limit) {
+        String direct = catalogDirect(query, offset, limit);
+        if (direct.length() > 2) return direct;
+        try { // the phone couldn't reach the pet site: Hermes' side asks it instead
+            Companion.Resp r = Companion.call(c, "GET", "/pet/catalog?q=" + java.net.URLEncoder.encode(query == null ? "" : query, "UTF-8") + "&offset=" + Math.max(0, offset) + "&limit=" + limit, null, 30_000, 400_000);
+            return r.code == 200 ? r.text() : direct;
+        } catch (Exception e) {
+            return direct;
+        }
+    }
+
+    private static String catalogDirect(String query, int offset, int limit) {
         try {
             JSONObject m = new JSONObject(new String(get(MANIFEST, 12_000_000), "UTF-8"));
             JSONArray pets = m.optJSONArray("pets");
@@ -171,29 +182,70 @@ final class PetSprites {
         }
     }
 
-    /** Downloads one pet's sheet. "" = installed, otherwise what went wrong. The URL must be the catalogue's https one. */
-    static String install(Context c, String slug, String url) {
-        if (!validSlug(slug) || !trustedUrl(url)) return "not a trusted AgentPets file";
-        try {
-            byte[] data;
-            try {
-                data = get(url, 8_000_000);
-            } catch (Exception first) { // the pet CDN rate-limits bursts: one patient retry
-                Thread.sleep(1500);
-                data = get(url, 8_000_000);
-            }
-            Bitmap b = BitmapFactory.decodeByteArray(data, 0, data.length);
-            if (b == null || b.getWidth() < COLS * 8 || b.getHeight() < ROWS * 8) return "not a pet spritesheet";
-            File f = new File(dir(c), slug + ".img");
-            try (FileOutputStream o = new FileOutputStream(f)) {
-                o.write(data);
-            }
-            synchronized (PetSprites.class) {
-                cache.put(slug, b);
-            }
-            return "";
+    /** Checks and stores a sheet. "" = installed, otherwise what is wrong with it. */
+    private static String save(Context c, String slug, byte[] data) {
+        Bitmap b = data == null ? null : BitmapFactory.decodeByteArray(data, 0, data.length);
+        if (b == null || b.getWidth() < COLS * 8 || b.getHeight() < ROWS * 8) return "not a pet spritesheet";
+        try (FileOutputStream o = new FileOutputStream(new File(dir(c), slug + ".img"))) {
+            o.write(data);
         } catch (Exception e) {
-            return e.getMessage() == null ? "download failed" : e.getMessage();
+            return "couldn't save";
         }
+        synchronized (PetSprites.class) {
+            cache.put(slug, b);
+        }
+        return "";
+    }
+
+    /**
+     * Downloads one pet's sheet. "" = installed, otherwise what went wrong. Tries the pet host from the phone (a browser identity,
+     * three ways), then asks Hermes' side to fetch it and hand it over on the loopback, so a CDN that refuses this phone doesn't matter.
+     */
+    static String install(Context c, String slug, String url) {
+        if (!validSlug(slug)) return "not a valid pet";
+        String why = "download failed";
+        if (url != null && trustedUrl(url)) {
+            try {
+                byte[] data;
+                try {
+                    data = get(url, 8_000_000);
+                } catch (Exception first) { // the pet CDN rate-limits bursts: one patient retry
+                    Thread.sleep(1500);
+                    data = get(url, 8_000_000);
+                }
+                String err = save(c, slug, data);
+                if (err.isEmpty()) return "";
+                why = err;
+            } catch (Exception e) {
+                why = e.getMessage() == null ? why : e.getMessage();
+            }
+        }
+        Companion.Resp r = Companion.call(c, "GET", "/pet/file?slug=" + slug, null, 60_000, 9_000_000);
+        if (r.code == 200) {
+            String err = save(c, slug, r.body);
+            if (err.isEmpty()) return "";
+            why = err;
+        } else if (r.code == 0) {
+            why += " (and Hermes' side isn't reachable)";
+        }
+        return why;
+    }
+
+    /**
+     * First-run pet with no choosing and no setup: the first pet that downloads, from Hermes' side, else straight from the pet site.
+     * Returns its slug, or "" if none could be fetched yet (the caller tries again later; the drawn blob stays until then).
+     */
+    static String autoInstall(Context c) {
+        Companion.Resp r = Companion.call(c, "GET", "/pet/auto", null, 120_000, 9_000_000);
+        if (r.code == 200 && validSlug(r.slug) && save(c, r.slug, r.body).isEmpty()) return r.slug;
+        try {
+            JSONArray a = new JSONArray(catalogDirect("", 0, 12));
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject p = a.getJSONObject(i);
+                if (install(c, p.getString("slug"), p.getString("url")).isEmpty()) return p.getString("slug");
+            }
+        } catch (Exception ignored) {
+        }
+        return "";
     }
 }

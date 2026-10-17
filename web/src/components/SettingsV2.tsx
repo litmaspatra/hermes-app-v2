@@ -21,7 +21,8 @@ import {
 } from '../bridge'
 import { confirmDialog } from '../dialog'
 import { toast } from '../store'
-import { fastbrainStatus, haptic, importPet, installedPets, neuralTtsStatus, setTtsVoice, testVoice as testNaturalVoice, ttsVoices, installPet, petCatalog, selectPet, saveVoiceAliases, voiceAliases } from '../bridge'
+import { DoctorPanel } from './Doctor'
+import { memoryAliases, fastbrainStatus, haptic, importPet, installedPets, neuralTtsStatus, setTtsVoice, testVoice as testNaturalVoice, ttsVoices, installPet, petCatalog, selectPet, saveVoiceAliases, voiceAliases } from '../bridge'
 import { dynamicColorsOn, reduceEffectsOn, savedStyle, setDynamicColors, setReduceEffects, setStyle, type Style } from '../theme'
 import { Row, Section, Segmented, SelectRow, ToggleRow } from './ui'
 
@@ -279,7 +280,8 @@ function PetGallery({ initial }: { initial: string }) {
 function AliasEditor() {
   const [text, setText] = useState(() => voiceAliases())
   return (
-    <Section title="Your names for people" footer="One per line: name = contact. For example “papa = Ramesh Sharma”. Misheard names that you confirm with “yes” are added here by themselves.">
+    <Section title="Your names for people" footer="You never have to type these: they are read from memory (FastBrain and Hindsight) and learned the first time you answer “Did you mean…?” or “Which one…?”. Anything typed here wins over memory.">
+      {memoryAliases() && <details style={{ padding: '4px 16px' }}><summary className="dim small">From memory ({memoryAliases().split('\n').filter(Boolean).length})</summary><pre className="dim small" style={{ whiteSpace: 'pre-wrap' }}>{memoryAliases()}</pre></details>}
       <textarea
         className="input"
         rows={5}
@@ -319,6 +321,9 @@ export function VoiceCommandsPage() {
             <ToggleRow icon="💬" tone="blue" title="Ask Hermes what FastBrain can't do" on={s.voice_hermes} onChange={v => set('voice_hermes', v)} />
             <ToggleRow icon="🔁" tone="gold" title="Keep listening after Hermes answers" on={s.voice_follow} onChange={v => set('voice_follow', v)} />
             <Row icon="🩺" tone="teal" title="Test FastBrain connection" onClick={() => toast(fastbrainStatus(), 'info')} />
+          </Section>
+          <Section title="Voice and brain doctor" footer="Checks FastBrain, the MiniLM brain, Piper with its four voices and memory, and installs or starts what is missing. It also runs by itself when the app starts.">
+            <DoctorPanel />
           </Section>
           <AliasEditor />
           <Section title="Language">

@@ -65,6 +65,19 @@ public class ContactMatcherTest {
         if (m.size() != 2 || !"Ramesh Sharma".equals(m.get("papa")) || !"Dr. Mehta".equals(m.get("boss"))) fail("aliases " + m);
         n++;
         if (!ContactMatcher.parseAliases(ContactMatcher.formatAliases(m)).equals(m)) fail("alias round trip");
+        // "Which one: A or B?" answers
+        java.util.List<String> opt = java.util.Arrays.asList("Rahul Sharma", "Rahul Verma", "Rahul Singh");
+        String[][] picks = {{"the second one", "Rahul Verma"}, {"first", "Rahul Sharma"}, {"Verma", "Rahul Verma"}, {"call Singh", "Rahul Singh"},
+                {"the last one", "Rahul Singh"}, {"dusra", "Rahul Verma"}, {"Rahul Sharma", "Rahul Sharma"}, {"rahul", null}, {"banana", null}};
+        for (String[] pk : picks) {
+            n++;
+            String got = ContactMatcher.pickOption(pk[0], opt);
+            if (pk[1] == null ? got != null : !pk[1].equals(got)) fail("pickOption(" + pk[0] + ") = " + got);
+        }
+        n++;
+        if (!"Rahul Sharma ending 4821".equals(ContactMatcher.pickOption("the first", java.util.Arrays.asList("Rahul Sharma ending 4821", "Rahul Sharma ending 1935")))) fail("same-name first");
+        n++;
+        if (!"Rahul Sharma ending 1935".equals(ContactMatcher.pickOption("1935", java.util.Arrays.asList("Rahul Sharma ending 4821", "Rahul Sharma ending 1935")))) fail("same-name digits");
         System.out.println("ContactMatcherTest: " + n + " cases passed");
     }
 }

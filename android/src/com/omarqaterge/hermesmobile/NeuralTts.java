@@ -105,17 +105,17 @@ final class NeuralTts {
         }, "tts-play").start();
     }
 
-    /** Is the voice server answering? If not, start it (once a minute) and wait up to 12 s for it. Background only. */
+    /** Is the voice server answering? If not, have the companion start it and wait up to 12 s for it. Background only. */
     private boolean ensureUp() {
         if (status(app).startsWith("The natural voice is ready")) return true;
-        if (!FastBrainClient.startBridges(app)) return false;
-        for (int i = 0; i < 17 && !stopped; i++) {
+        if (!Companion.ensure(app, 12_000)) return false;
+        for (int i = 0; i < 12 && !stopped; i++) {
+            if (status(app).startsWith("The natural voice is ready")) return true;
             try {
                 Thread.sleep(700);
             } catch (InterruptedException e) {
                 return false;
             }
-            if (status(app).startsWith("The natural voice is ready")) return true;
         }
         return false;
     }
@@ -243,10 +243,10 @@ final class NeuralTts {
             int code = h.getResponseCode();
             if (code == 200) return "The natural voice is ready.";
             if (code == 403) return "The voice server refused the app's key. Open Hermes once, then restart it.";
-            if (code == 503) return "The voice server is running but has no voice installed. Run setup-piper.sh again.";
+            if (code == 503) return "The voice server is running but has no voice installed. Settings → Voice → Fix everything downloads them.";
             return "The voice server answered HTTP " + code + ".";
         } catch (java.net.ConnectException e) {
-            return "The voice server isn't running. In Termux / your Linux shell: bash ~/FastBrain/scripts/setup-piper.sh";
+            return "The voice server isn't running. It restarts by itself; if it stays down: Settings → Voice → Fix everything.";
         } catch (Exception e) {
             return "Couldn't reach the voice server: " + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
         } finally {

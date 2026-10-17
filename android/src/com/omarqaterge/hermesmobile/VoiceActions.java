@@ -86,14 +86,57 @@ final class VoiceActions {
         } catch (Exception e) {
             return new ArrayList<>();
         }
-        book = new ArrayList<>(m.values());
+        // The same person saved under several accounts (Google, SIM, WhatsApp) comes as several contacts with one name and
+        // the same number: that is one person, not "several contacts called X".
+        List<Person> merged = new ArrayList<>();
+        for (Person p : m.values()) {
+            Person into = null;
+            for (Person q : merged) if (ContactMatcher.key(q.name).equals(ContactMatcher.key(p.name)) && sharesNumber(q, p)) {
+                into = q;
+                break;
+            }
+            if (into == null) {
+                merged.add(p);
+                continue;
+            }
+            for (int i = 0; i < p.numbers.size(); i++) {
+                boolean have = false;
+                for (String x : into.numbers) if (tail(x).equals(tail(p.numbers.get(i)))) have = true;
+                if (!have) {
+                    into.numbers.add(p.numbers.get(i));
+                    into.types.add(p.types.get(i));
+                }
+            }
+        }
+        book = merged;
         bookAt = System.currentTimeMillis();
         return book;
+    }
+
+    /** The last 10 digits of a number: +91 98xxxxxx21 and 098xxxxxx21 are the same phone. */
+    static String tail(String n) {
+        String d = n == null ? "" : n.replaceAll("[^0-9]", "");
+        return d.length() > 10 ? d.substring(d.length() - 10) : d;
+    }
+
+    private static boolean sharesNumber(Person a, Person b) {
+        for (String x : a.numbers) for (String y : b.numbers) if (tail(x).equals(tail(y))) return true;
+        return false;
+    }
+
+    /** "Which one is it?" was answered once for two contacts that share a name: use that number from now on. */
+    static void pin(Context c, String name, String number) {
+        c.getSharedPreferences("hm", Context.MODE_PRIVATE).edit().putString("voice_pin_" + ContactMatcher.key(name), tail(number)).apply();
+    }
+
+    private static String pinned(Context c, String name) {
+        return c.getSharedPreferences("hm", Context.MODE_PRIVATE).getString("voice_pin_" + ContactMatcher.key(name), "");
     }
 
     /** Reads the contacts in the background so the first spoken name is matched without a wait. */
     static void warm(Context c) {
         final Context app = c.getApplicationContext();
+        VoiceAliases.syncFromMemory(app); // the names memory already knows, before the first name is spoken
         if (!has(app, Manifest.permission.READ_CONTACTS)) return;
         new Thread(() -> people(app), "voice-contacts").start();
     }
@@ -141,6 +184,8 @@ final class VoiceActions {
         final VoiceCommands.Command confirm; // null unless `reply` is a question
         final String heard;                  // what was said for the contact, to learn as an alias once confirmed
         boolean missed;                      // no contact came close: the caller may try another source (FastBrain's own aliases)
+        List<VoiceCommands.Command> options; // several equally good contacts: the reply asks which, and the answer picks one of these
+        List<String> labels;                 // what each option is called when spoken, in the same order
 
         Outcome(String reply, VoiceCommands.Command confirm, String heard) {
             this.reply = reply;
@@ -234,8 +279,21 @@ final class VoiceActions {
         Outcome stop;
     }
 
+    private static String asking(List<String> labels) {
+        StringBuilder b = new StringBuilder("Which one: ");
+        for (int i = 0; i < labels.size(); i++) b.append(i == 0 ? "" : i == labels.size() - 1 ? " or " : ", ").append(labels.get(i));
+        return b.append("?").toString();
+    }
+
     private static Target target(Context c, VoiceCommands.Command cmd, List<String> heard, boolean locked, String verb) {
         Target t = new Target();
+        if (!cmd.number.isEmpty()) { // the person already chose between two contacts of the same name
+            for (Person p : named(c, cmd.name)) for (String n : p.numbers) if (tail(n).equals(tail(cmd.number))) {
+                t.number = n;
+                t.name = p.name;
+                return t;
+            }
+        }
         ContactMatcher.Result r = lookup(c, heard);
         String said = cmd.name;
         if (r.how == ContactMatcher.How.NONE) {
@@ -244,10 +302,21 @@ final class VoiceActions {
             return t;
         }
         if (r.how == ContactMatcher.How.AMBIGUOUS) {
-            String l = r.others == null || r.others.size() < 2 ? "" : r.others.get(0) + " or " + r.others.get(1);
-            t.stop = new Outcome(locked ? "Several matches. Unlock to choose."
-                    : l.isEmpty() ? "I found several contacts called " + said + ". Please " + verb + " by their full name."
-                    : "Which one: " + l + "? Please " + verb + " by their full name.", null, null);
+            if (locked || r.others == null || r.others.size() < 2) {
+                t.stop = new Outcome(locked ? "Several matches. Unlock to choose." : "I found several contacts called " + said + ". Please " + verb + " by their full name.", null, null);
+                return t;
+            }
+            // Ask once; the answer is remembered as an alias (and in memory), so this question never comes again.
+            List<VoiceCommands.Command> opts = new ArrayList<>();
+            List<String> labels = new ArrayList<>();
+            for (String n : r.others) {
+                if (opts.size() >= 4) break;
+                opts.add(new VoiceCommands.Command(cmd.type, n, cmd.text, cmd.a, cmd.b));
+                labels.add(n);
+            }
+            t.stop = new Outcome(asking(labels), null, said);
+            t.stop.options = opts;
+            t.stop.labels = labels;
             return t;
         }
         if (!r.confident()) {
@@ -266,7 +335,29 @@ final class VoiceActions {
             return t;
         }
         if (hits.size() > 1) {
-            t.stop = new Outcome(locked ? "Several matches. Unlock to choose." : "I found several contacts called " + r.name + ". Please " + verb + " by their full name.", null, null);
+            String pin = pinned(c, r.name);
+            if (!pin.isEmpty()) for (Person p : hits) for (String n : p.numbers) if (tail(n).equals(pin)) {
+                t.number = n;
+                t.name = p.name;
+                return t;
+            }
+            if (locked) {
+                t.stop = new Outcome("Several matches. Unlock to choose.", null, null);
+                return t;
+            }
+            // Two different people saved under one name: tell them apart by the end of their number, ask once, remember.
+            List<VoiceCommands.Command> opts = new ArrayList<>();
+            List<String> labels = new ArrayList<>();
+            for (Person p : hits) {
+                if (opts.size() >= 4) break;
+                String num = pick(p) != null ? pick(p) : p.numbers.isEmpty() ? "" : p.numbers.get(0);
+                String t4 = tail(num);
+                opts.add(new VoiceCommands.Command(cmd.type, p.name, cmd.text, cmd.a, cmd.b, num));
+                labels.add(p.name + " ending " + (t4.length() >= 4 ? t4.substring(t4.length() - 4) : t4));
+            }
+            t.stop = new Outcome(asking(labels), null, said);
+            t.stop.options = opts;
+            t.stop.labels = labels;
             return t;
         }
         String num = pick(hits.get(0));

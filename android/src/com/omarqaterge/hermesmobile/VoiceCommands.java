@@ -21,13 +21,19 @@ final class VoiceCommands {
         final String text;   // message body
         final int a;         // seconds (TIMER), hour (ALARM), 1/0 (TORCH on/off), +1/-1/percent (VOLUME)
         final int b;         // minute (ALARM), 0 = relative / 1 = absolute (VOLUME)
+        final String number; // CALL, MESSAGE: the exact number to use when two contacts share a name ("" = decide from the name)
 
         Command(Type type, String name, String text, int a, int b) {
+            this(type, name, text, a, b, "");
+        }
+
+        Command(Type type, String name, String text, int a, int b, String number) {
             this.type = type;
             this.name = name;
             this.text = text;
             this.a = a;
             this.b = b;
+            this.number = number == null ? "" : number;
         }
 
         @Override

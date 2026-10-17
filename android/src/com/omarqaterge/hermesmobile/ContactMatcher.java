@@ -201,6 +201,51 @@ final class ContactMatcher {
         return new Result(How.SUGGEST, top, s1, null);
     }
 
+    private static final String[][] ORDINALS = {
+            {"first", "1st", "one", "1", "pehla", "pehle", "pahla", "pahle", "ek"},
+            {"second", "2nd", "two", "2", "dusra", "doosra", "dusre", "doosre", "do"},
+            {"third", "3rd", "three", "3", "teesra", "tisra", "teesre", "teen"},
+            {"fourth", "4th", "four", "4", "chautha", "chaar"}};
+
+    /**
+     * Which of the contacts offered ("Which one: A, B or C?") a spoken answer means: "the second one", "Sharma", "Rahul Verma",
+     * "the last". Null when it isn't clear, so the caller can ask again instead of guessing between two people.
+     */
+    static String pickOption(String said, List<String> options) {
+        if (options == null || options.isEmpty()) return null;
+        String k = key(said).replaceAll("^(?:(?:the|i|meant|mean|call|message|text|send|to|it|is|was|woh|wo|wala|vala|ko)\\s+)+", "").replaceAll("(?:\\s+(?:one|wala|vala|please|ji))+$", "").trim();
+        if (k.isEmpty()) k = key(said);
+        if (k.equals("last") || k.equals("last one") || k.equals("aakhri") || k.equals("akhri")) return options.get(options.size() - 1);
+        for (int i = 0; i < ORDINALS.length && i < options.size(); i++)
+            for (String o : ORDINALS[i]) if (k.equals(o)) return options.get(i);
+        for (String o : options) if (key(o).equals(k)) return o;
+        // words that belong to exactly one option ("sharma" when the other is "verma")
+        String only = null;
+        int hits = 0;
+        for (String o : options) {
+            List<String> mine = new ArrayList<>(java.util.Arrays.asList(key(o).split(" ")));
+            for (String other : options) if (!other.equals(o)) mine.removeAll(java.util.Arrays.asList(key(other).split(" ")));
+            boolean all = !mine.isEmpty();
+            for (String w : k.split(" ")) if (!mine.contains(w) && !w.isEmpty()) all = false;
+            if (all) {
+                only = o;
+                hits++;
+            }
+        }
+        if (hits == 1) return only;
+        String top = null;
+        double s1 = 0, s2 = 0;
+        for (String o : options) {
+            double s = best(said, o);
+            if (s > s1) {
+                s2 = s1;
+                s1 = s;
+                top = o;
+            } else if (s > s2) s2 = s;
+        }
+        return top != null && s1 >= CONFIDENT && s1 - s2 >= MARGIN ? top : null;
+    }
+
     /** Best result across several recogniser alternatives (it returns a few guesses): the most confident wins. */
     static Result matchAny(List<String> heard, List<String> names, Map<String, String> aliases) {
         Result best = new Result(How.NONE, null, 0, null);

@@ -5,6 +5,7 @@ import { reconnectNow } from '../gateway'
 import { getState, toast, useStore } from '../store'
 import { ScreenShell } from './Screens'
 import { Spinner } from './Spinner'
+import { DoctorPanel } from './Doctor'
 
 // Setup check (drawer → Settings, the status sheet, the offline banner, or by itself on a first run that can't
 // connect): every piece the app needs, a ✓ or ✗ each, and a button that fixes it or opens the right Android page.
@@ -203,6 +204,12 @@ export function SetupScreen() {
           </li>
         ))}
       </ul>
+      {isNative && (
+        <>
+          <div className="setup-title" style={{ padding: '16px 16px 0' }}>Voice and brain doctor</div>
+          <DoctorPanel />
+        </>
+      )}
     </ScreenShell>
   )
 }

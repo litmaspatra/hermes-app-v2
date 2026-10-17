@@ -12,7 +12,7 @@ const METHODS = [
   'getToken', 'httpAsync', 'openFile', 'getBaseUrl', 'startHermes', 'notify', 'setBackground', 'isSystemDark',
   'cancelNotification', 'openExternal', 'copyText', 'copyRich', 'haptic', 'isInForeground', 'appVersion',
   'sharedItem', 'mediaBase', 'setLastChat', 'getTokenAsync', 'setupState', 'setupFix', 'isAssistant', 'openAssistantSettings', 'signInTermux', 'installUpdate',
-  'nativeSettings', 'setNative', 'openOverlaySettings', 'requestVoicePermissions', 'approvalState', 'saveAllowlist', 'testCommand', 'history', 'clearHistory', 'systemColors', 'approvalAnswered', 'voiceReply', 'voiceAliases', 'fastbrainStatus', 'pageWorking', 'neuralTtsStatus', 'ttsVoices', 'testVoice', 'setTtsVoice', 'petCatalog', 'installPet', 'importPet', 'installedPets', 'selectPet', 'saveVoiceAliases'
+  'nativeSettings', 'setNative', 'openOverlaySettings', 'requestVoicePermissions', 'approvalState', 'saveAllowlist', 'testCommand', 'history', 'clearHistory', 'systemColors', 'approvalAnswered', 'voiceReply', 'voiceAliases', 'fastbrainStatus', 'pageWorking', 'neuralTtsStatus', 'ttsVoices', 'testVoice', 'setTtsVoice', 'petCatalog', 'installPet', 'importPet', 'installedPets', 'selectPet', 'saveVoiceAliases', 'doctorRefresh', 'doctorState', 'doctorFix', 'memoryAliases'
 ]
 
 const w = window as unknown as { HermesAndroid?: unknown }

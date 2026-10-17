@@ -266,6 +266,32 @@ final class VoiceController {
         // 1. an open question ("Did you mean ...?") is answered with yes / no
         if (asked != null) {
             VoiceRouter.Result q = asked;
+            if (q.options != null) { // "Which one: A or B?"
+                if (VoiceCommands.yesNo(text) < 0) {
+                    asked = null;
+                    reply("Okay, I won't.", text, "no", false);
+                    return;
+                }
+                int at = -1;
+                for (String h : heard) {
+                    String pick = ContactMatcher.pickOption(h, q.labels);
+                    if (pick != null) {
+                        at = q.labels.indexOf(pick);
+                        break;
+                    }
+                }
+                if (at < 0) {
+                    reply("Sorry, which one? Say first, second, or the name.", text, "unclear choice", true);
+                    return; // the question stays open
+                }
+                asked = null;
+                VoiceCommands.Command chosen = q.options.get(at);
+                VoiceActions.Outcome o = VoiceActions.exec(svc, chosen, locked, null);
+                if (!chosen.number.isEmpty()) VoiceActions.pin(svc, chosen.name, chosen.number);       // same name twice: remember the number
+                else if (q.heard != null) VoiceAliases.learn(svc, q.heard, chosen.name);              // else remember what the name means
+                reply(o.reply, text, "chose " + chosen.type, converse);
+                return;
+            }
             int yn = VoiceCommands.yesNo(text);
             if (yn != 0) {
                 asked = null;
@@ -308,7 +334,7 @@ final class VoiceController {
             askHermes(r.hermesText, r.command);
             return;
         }
-        asked = r.confirm != null || r.fbConfirm ? r : null;
+        asked = r.confirm != null || r.fbConfirm || r.options != null ? r : null;
         HistoryStore.append(svc, "voice", "", text, r.how + " " + r.detail + ": " + r.reply);
         reply(r.reply, text, null, converse || asked != null);
     }

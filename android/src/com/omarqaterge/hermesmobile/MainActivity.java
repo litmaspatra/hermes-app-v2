@@ -1270,7 +1270,7 @@ public class MainActivity extends Activity {
         /** AgentPets catalogue as JSON [{slug,name,url}], filtered by `query` (empty on failure). Blocking. */
         @JavascriptInterface
         public String petCatalog(String key, String query, int offset) {
-            return ok(key) ? PetSprites.catalog(query, Math.max(0, offset), 24) : "";
+            return ok(key) ? PetSprites.catalog(MainActivity.this, query, Math.max(0, offset), 24) : "";
         }
 
         /** Downloads a pet's spritesheet and makes it the pet. "" = done, otherwise what went wrong. Blocking. */
@@ -1350,6 +1350,30 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public String fastbrainStatus(String key) {
             return ok(key) ? FastBrainClient.status(MainActivity.this) : "not allowed";
+        }
+
+        /** Asks the companion for its doctor report in the background; read it with doctorState. Never blocks the page. */
+        @JavascriptInterface
+        public void doctorRefresh(String key) {
+            if (ok(key)) Companion.refreshAsync(MainActivity.this);
+        }
+
+        /** The last doctor report as JSON ("" until the first refresh answers). Instant. */
+        @JavascriptInterface
+        public String doctorState(String key) {
+            return ok(key) ? Companion.lastStatus : "";
+        }
+
+        /** Installs and starts whatever the doctor found missing (FastBrain, MiniLM, Piper, the voices). Runs on the phone's Linux side. */
+        @JavascriptInterface
+        public void doctorFix(String key) {
+            if (ok(key)) Companion.fixAsync(MainActivity.this);
+        }
+
+        /** The aliases memory contributed ("alias = Contact" per line). */
+        @JavascriptInterface
+        public String memoryAliases(String key) {
+            return ok(key) ? VoiceAliases.memoryText(MainActivity.this) : "";
         }
 
         /** The page reports the final reply to a spoken question (window.hermesVoiceAsk). Empty text = it failed. */

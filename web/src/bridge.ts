@@ -55,6 +55,10 @@ interface AndroidBridge {
   installedPets?(): string
   selectPet?(slug: string): void
   voiceAliases?(): string
+  memoryAliases?(): string
+  doctorRefresh?(): void
+  doctorState?(): string
+  doctorFix?(): void
   saveVoiceAliases?(text: string): string
   systemColors?(): string // Material You colours (Android 12+), or 'null'
 }
@@ -376,6 +380,21 @@ export const reportWorking = (working: boolean): void => {
 export const fastbrainStatus = (): string => nat()?.fastbrainStatus?.() ?? 'not available'
 export const voiceReply = (text: string): void => nat()?.voiceReply?.(text)
 export const voiceAliases = (): string => nat()?.voiceAliases?.() ?? ''
+export const memoryAliases = (): string => nat()?.memoryAliases?.() ?? ''
+
+/** The doctor's report from the companion that runs inside Hermes (FastBrain, MiniLM, Piper, voices, memory). */
+export interface DoctorCheck { id: string; title: string; ok: boolean; detail: string; fix: boolean }
+export interface Doctor {
+  down?: boolean
+  ok?: boolean
+  checks?: DoctorCheck[]
+  voices?: string[]
+  aliases?: number
+  task?: { running: boolean; step: string; log: string[]; done: boolean; ok: boolean | null }
+}
+export const doctorRefresh = (): void => nat()?.doctorRefresh?.()
+export const doctorFix = (): void => nat()?.doctorFix?.()
+export const doctorState = (): Doctor | null => json<Doctor | null>(nat()?.doctorState?.(), null)
 export const saveVoiceAliases = (text: string): string => nat()?.saveVoiceAliases?.(text) ?? 'not available'
 export const openOverlaySettings = (): void => nat()?.openOverlaySettings?.()
 export const requestVoicePermissions = (): void => nat()?.requestVoicePermissions?.()

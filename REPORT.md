@@ -1,5 +1,15 @@
 # Hermes Mobile v2: report
 
+## v2.7 (not run on a phone; Java not compiled against Android here, see "Verified")
+- **Why FastBrain/Piper died with the app**: the app started them through a short-lived `proot-distro login`; when that login ends, proot kills everything it started. Now `hermes-plugin/hermes-mobile/services.py` runs inside Hermes' own long-lived process (loaded by the plugin): every 20 s it starts whatever is down (router, bridge 8765, Piper 8766, MiniLM). One supervisor at a time (file lock). If Hermes isn't running, the app starts the supervisor as the foreground process of its own Debian session. The app checks every 90 s.
+- **Doctor** (Setup check, Settings → Voice, and automatically once per app start, at most every 6 h): checks and installs FastBrain, MiniLM model files + numpy/onnxruntime and switches FastBrain to MiniLM, Piper and four voices (lessac, ryan, amy, en_GB-alan; voices already in `~/piper-voices` or `~/.hermes/cache/piper-voices` are reused), links FastBrain to Hindsight Lite, reports duplicate FastBrain folders, and tells whether Hindsight Lite can save by itself.
+- **Pets**: install tries the phone, then Hermes' side fetches it (agentpets.dev, then petdex.dev manifest) and hands it over on the loopback. With no pet installed the app picks the first one that downloads by itself; the drawn blob shows until then.
+- **Contacts**: duplicates of one person (same name, same number) are merged. Two or more different matches: it asks once ("Which one: A or B?", answer "first", "Sharma", "the last"), then remembers (alias, or the chosen number for two people of one name). Aliases are read from FastBrain's cache (fed from Hindsight Lite) and learned ones are written back to FastBrain and Hindsight; only aliases whose contact exists are used.
+- Control port 8767 (same key). Redeploy `hermes-plugin/hermes-mobile` AND install the APK.
+
+## Verified
+Pure-Java tests (ContactMatcher 32 incl. new pickOption, VoiceCommands 60, ApprovalPolicy 87, Prosody 9), web typecheck and 88 web tests, services.py smoke-tested with a fake home (status, control port, auth). NOT done: Android compile, APK build, any phone test.
+
 ## v2.6
 - **Approvals**: an in-app answer is now matched to the island's copy by request id, else by the command text (the page's and the plugin's session ids differ, which is why answered approvals kept coming back).
 - **FastBrain/Piper bridges**: the scripts read the app's key from Termux's absolute path (as the plugin does; the home-folder default was wrong inside proot), and the app starts them itself (`scripts/start-app-bridges.sh` via Termux RUN_COMMAND) when a voice command finds them down. Piper finds voices in the usual folders (`~/piper-voices`, `~/.hermes/cache/piper-voices`, `~/FastBrain/piper-voices/*`).

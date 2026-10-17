@@ -36,45 +36,29 @@ final class FastBrainClient {
         return c.getSharedPreferences("hermes", Context.MODE_PRIVATE).getString("event_key", "");
     }
 
-    private static long lastStart;
-
     /**
-     * Starts the FastBrain bridge and the voice server inside Termux's Debian (scripts/start-app-bridges.sh), at most once
-     * a minute. Needs Termux's RUN_COMMAND permission, which the app already uses to share its key. True if it was started.
+     * Brings the companion (services.py in the Hermes plugin) up, which keeps the bridge and the voice server alive from inside
+     * Hermes' own process. See Companion. True if a start was requested.
      */
-    static synchronized boolean startBridges(Context c) {
-        if (System.currentTimeMillis() - lastStart < 60_000) return false;
-        if (c.checkSelfPermission("com.termux.permission.RUN_COMMAND") != android.content.pm.PackageManager.PERMISSION_GRANTED) return false;
-        lastStart = System.currentTimeMillis();
-        try {
-            android.content.Intent i = new android.content.Intent();
-            i.setClassName("com.termux", "com.termux.app.RunCommandService");
-            i.setAction("com.termux.RUN_COMMAND");
-            i.putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/sh");
-            i.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", new String[] {"-c",
-                    "proot-distro login debian -- bash -lc 'for d in ~/FastBrain ~/*/FastBrain; do [ -f $d/scripts/start-app-bridges.sh ] && exec bash $d/scripts/start-app-bridges.sh; done'"});
-            i.putExtra("com.termux.RUN_COMMAND_BACKGROUND", true);
-            c.startForegroundService(i);
-            return true;
-        } catch (Exception e) {
-            return false;
-        }
+    static boolean startBridges(Context c) {
+        return Companion.startSupervisor(c);
     }
 
-    /** Background, periodic: start the bridge / voice server again if either is down (and the person uses them). */
+    /** Background, periodic: if the companion or what it keeps (bridge, voice server) is down, bring it back (a localhost call, almost free). */
     static void watch(Context c) {
         final Context app = c.getApplicationContext();
         if (!enabled(app) && !NeuralTts.enabled(app)) return;
         new Thread(() -> {
-            if (status(app).startsWith("The FastBrain bridge isn't running") || NeuralTts.status(app).startsWith("The voice server isn't running")) startBridges(app);
+            if (!Companion.up(app)) Companion.startSupervisor(app);
+            else if (status(app).startsWith("The FastBrain bridge isn't running") || NeuralTts.status(app).startsWith("The voice server isn't running")) Companion.ensure(app, 0);
         }, "fb-watch").start();
     }
 
-    /** Background: if the bridge is down, start it now, so it is up by the time the command has been spoken. */
+    /** Background: if the bridge is down, bring it up now, so it is up by the time the command has been spoken. */
     static void warm(Context c) {
         final Context app = c.getApplicationContext();
         new Thread(() -> {
-            if (enabled(app) && status(app).startsWith("The FastBrain bridge isn't running")) startBridges(app);
+            if (enabled(app) && status(app).startsWith("The FastBrain bridge isn't running")) Companion.ensure(app, 15_000);
         }, "fb-warm").start();
     }
 
@@ -88,11 +72,11 @@ final class FastBrainClient {
             h.setRequestProperty("X-Hermes-Mobile-Key", key(c));
             int code = h.getResponseCode();
             if (code == 200) return "FastBrain is connected.";
-            if (code == 403) return "FastBrain's bridge refused the app's key. Open Hermes once (the app rewrites ~/.hermes-mobile/key), then restart the bridge.";
-            if (code == 503) return "The bridge is running but the FastBrain router isn't. Run start-fastbrain-router.sh in Termux.";
+            if (code == 403) return "FastBrain's bridge refused the app's key. Open Hermes once (the app rewrites ~/.hermes-mobile/key), then Settings → Voice → Fix everything.";
+            if (code == 503) return "The bridge is running but the FastBrain router isn't. Settings → Voice → Fix everything starts it.";
             return "FastBrain answered HTTP " + code + ".";
         } catch (java.net.ConnectException e) {
-            return "The FastBrain bridge isn't running. In Termux: bash ~/FastBrain/scripts/start-fastbrain-router.sh (use the updated FastBrain).";
+            return "The FastBrain bridge isn't running. It restarts by itself; if it stays down: Settings → Voice → Fix everything.";
         } catch (Exception e) {
             return "Couldn't reach FastBrain: " + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
         } finally {

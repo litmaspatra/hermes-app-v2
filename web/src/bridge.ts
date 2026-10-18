@@ -388,6 +388,7 @@ export const memoryAliases = (): string => nat()?.memoryAliases?.() ?? ''
 export interface DoctorCheck { id: string; title: string; ok: boolean; detail: string; fix: boolean }
 export interface Doctor {
   down?: boolean
+  why?: string
   ok?: boolean
   checks?: DoctorCheck[]
   voices?: string[]

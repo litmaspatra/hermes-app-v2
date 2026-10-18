@@ -106,10 +106,11 @@ final class Companion {
                 src = o.toByteArray();
             }
             String b64 = android.util.Base64.encodeToString(src, android.util.Base64.NO_WRAP);
-            String d = "/data/data/com.termux/files/usr/var/lib/proot-distro/installed-rootfs/debian/root/.hermes-mobile";
+            // Piped in through proot-distro itself, so it lands in the right Debian whatever the rootfs path is on this phone.
+            String put = "mkdir -p /root/.hermes-mobile && base64 -d > /root/.hermes-mobile/services.py.new && mv /root/.hermes-mobile/services.py.new /root/.hermes-mobile/services.py";
             String inDebian = "exec python3 /root/.hermes-mobile/services.py serve";
             i.putExtra("com.termux.RUN_COMMAND_ARGUMENTS", new String[] {"-c",
-                    "mkdir -p " + d + " && echo '" + b64 + "' | base64 -d > " + d + "/services.py.new && mv " + d + "/services.py.new " + d + "/services.py; "
+                    "echo '" + b64 + "' | proot-distro login debian -- bash -c '" + put + "'; "
                             + "[ -x ~/bin/hermes-services ] && (~/bin/hermes-services >/dev/null 2>&1 &); "
                             + "proot-distro login debian -- bash -lc '" + inDebian + "'"});
             i.putExtra("com.termux.RUN_COMMAND_BACKGROUND", true);
@@ -155,10 +156,16 @@ final class Companion {
     static void refreshAsync(Context c) {
         final Context app = c.getApplicationContext();
         new Thread(() -> {
-            String s = status(app);
+            Resp probe = call(app, "GET", "/health", null, 2500, 2000);
+            String s = probe.code == 200 ? status(app) : "";
             if (s.isEmpty()) {
-                startSupervisor(app); // not answering: ask for it, the next refresh will see it
-                s = "{\"down\":true}";
+                boolean asked = startSupervisor(app); // not answering: ask for it, the next refresh will see it
+                String why = probe.code == 403 ? "The helper is running but can't read the app's key file (~/.hermes-mobile/key), so it refuses the app."
+                        : app.checkSelfPermission("com.termux.permission.RUN_COMMAND") != PackageManager.PERMISSION_GRANTED
+                        ? "The app has no permission to start things in Termux (Settings, Apps, Hermes, Permissions, Run commands in Termux)."
+                        : asked ? "Just asked Termux to start it; give it up to a minute."
+                        : "Nothing is listening on port 8767. In Termux run: proot-distro login debian -- python3 /root/.hermes-mobile/services.py status";
+                s = "{\"down\":true,\"why\":" + JSONObject.quote(why) + "}";
             }
             lastStatus = s;
         }, "doctor-status").start();

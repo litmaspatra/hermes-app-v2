@@ -70,7 +70,7 @@ export function DoctorPanel() {
   if (d.down) {
     return (
       <div className="setup-help" style={{ padding: '8px 16px' }}>
-        Hermes' helper isn't answering yet. It starts with Hermes: open Termux once if Hermes is offline, then this page checks again by itself.
+        Hermes' helper isn't answering yet. {d.why}
       </div>
     )
   }

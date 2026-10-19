@@ -13,7 +13,7 @@ PLATFORM=35          # targetSdk
 COMPILE_PLATFORM=36  # compile against Android 16 APIs (Live Updates)
 BT="$SDK/build-tools/35.0.0"
 ANDROID_JAR="$SDK/platforms/android-$COMPILE_PLATFORM/android.jar"
-VERSION_NAME="${VERSION_NAME:-0.1.0}"
+VERSION_NAME="${VERSION_NAME:-$(cat ../VERSION)}"
 VERSION_CODE="${VERSION_CODE:-1}"
 KS="${KEYSTORE:-$HOME/.android/hermes-mobile.keystore}"  # CI passes the release key here
 

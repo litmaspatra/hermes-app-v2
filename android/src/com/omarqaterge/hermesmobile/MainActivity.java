@@ -1047,7 +1047,7 @@ public class MainActivity extends Activity {
     static boolean updateUrlOk(Uri u) {
         String path = u == null ? null : u.getPath();
         return u != null && "https".equals(u.getScheme()) && "github.com".equals(u.getHost()) && path != null
-                && path.startsWith("/omarqaterge/hermes-mobile-app/releases/download/") && path.endsWith(".apk") && !path.contains("..");
+                && path.startsWith("/litmaspatra/hermes-app-v2/releases/download/") && path.endsWith(".apk") && !path.contains("..");
     }
 
     void updateState(String state, int pct, String msg) {

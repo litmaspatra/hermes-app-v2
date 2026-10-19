@@ -10,7 +10,7 @@ import { DoctorPanel } from './Doctor'
 // Setup check (drawer → Settings, the status sheet, the offline banner, or by itself on a first run that can't
 // connect): every piece the app needs, a ✓ or ✗ each, and a button that fixes it or opens the right Android page.
 
-const INSTALL = 'curl -fsSL https://raw.githubusercontent.com/omarqaterge/hermes-mobile-app/main/phone/install.sh | bash'
+const INSTALL = 'curl -fsSL https://raw.githubusercontent.com/litmaspatra/hermes-app-v2/main/phone/install.sh | bash'
 
 type State = 'ok' | 'bad' | 'wait' | 'skip'
 interface Check {

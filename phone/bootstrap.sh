@@ -2,7 +2,7 @@
 # The whole phone side in one go, no questions asked: Termux packages, Debian, Hermes Agent, the Hermes Mobile plugin and
 # the supervisor. Run it in TERMUX (not inside Debian). Made for a computer agent driving the phone over adb (see
 # AGENT_INSTALL.md), works by hand too:
-#   curl -fsSL https://raw.githubusercontent.com/omarqaterge/hermes-mobile-app/main/phone/bootstrap.sh -o hm.sh && bash hm.sh
+#   curl -fsSL https://raw.githubusercontent.com/litmaspatra/hermes-app-v2/main/phone/bootstrap.sh -o hm.sh && bash hm.sh
 # Then set the model (the key goes to Hermes's .env, never anywhere else):
 #   bash hm.sh model <provider> <model> [ENV_NAME=key]     e.g.  bash hm.sh model openrouter openai/gpt-5 OPENROUTER_API_KEY=sk-...
 # Progress goes to the screen AND to Android's log, so a computer can follow it:  adb logcat -s hmsetup
@@ -79,7 +79,7 @@ fi
 deb "hermes --version | grep Hermes"
 
 step plugin "Hermes Mobile plugin and supervisor"
-curl -fsSL https://raw.githubusercontent.com/omarqaterge/hermes-mobile-app/main/phone/install.sh -o "$HOME/hm-install.sh"
+curl -fsSL https://raw.githubusercontent.com/litmaspatra/hermes-app-v2/main/phone/install.sh -o "$HOME/hm-install.sh"
 HM_NO_APK=1 bash "$HOME/hm-install.sh"
 # Termux:Boot (if installed) starts Hermes after a reboot.
 mkdir -p "$HOME/.termux/boot"

@@ -3,7 +3,7 @@
 **Human:** plug your phone into your computer and give your coding agent (Claude Code, Codex, Cursor, Gemini CLI…) this prompt:
 
 ```text
-Read https://raw.githubusercontent.com/omarqaterge/hermes-mobile-app/main/AGENT_INSTALL.md and follow it to set up Hermes on my Android phone.
+Read https://raw.githubusercontent.com/litmaspatra/hermes-app-v2/main/AGENT_INSTALL.md and follow it to set up Hermes on my Android phone.
 ```
 
 Everything below is for the agent.
@@ -47,14 +47,14 @@ Steps 1-9 below are automated in one script. Use it first; fall back to the manu
    macOS / Linux:
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/omarqaterge/hermes-mobile-app/main/tools/setup-phone.sh -o setup-phone.sh
+   curl -fsSL https://raw.githubusercontent.com/litmaspatra/hermes-app-v2/main/tools/setup-phone.sh -o setup-phone.sh
    HM_PROVIDER=openrouter HM_MODEL=<model id> HM_KEY_NAME=OPENROUTER_API_KEY HM_KEY=<key> bash setup-phone.sh > setup.log 2>&1
    ```
 
    Windows (PowerShell):
 
    ```powershell
-   irm https://raw.githubusercontent.com/omarqaterge/hermes-mobile-app/main/tools/setup-phone.ps1 -OutFile setup-phone.ps1
+   irm https://raw.githubusercontent.com/litmaspatra/hermes-app-v2/main/tools/setup-phone.ps1 -OutFile setup-phone.ps1
    $env:HM_PROVIDER='openrouter'; $env:HM_MODEL='<model id>'; $env:HM_KEY_NAME='OPENROUTER_API_KEY'; $env:HM_KEY='<key>'
    powershell -ExecutionPolicy Bypass -File setup-phone.ps1 *> setup.log
    ```
@@ -172,7 +172,7 @@ adb logcat -d -s 'hmsetup:*'
 Once `ready` shows up, type the installer (one line):
 
 ```bash
-adb shell "input text 'curl%s-fsSL%shttps://raw.githubusercontent.com/omarqaterge/hermes-mobile-app/main/phone/bootstrap.sh%s-o%shm.sh%s&&%sbash%shm.sh'"
+adb shell "input text 'curl%s-fsSL%shttps://raw.githubusercontent.com/litmaspatra/hermes-app-v2/main/phone/bootstrap.sh%s-o%shm.sh%s&&%sbash%shm.sh'"
 adb shell input keyevent 66
 ```
 
@@ -230,7 +230,7 @@ The user can change all of this later in the app: Settings → Subscriptions & a
 ## 8. Install the app
 
 ```bash
-curl -fL -o hermes-mobile.apk https://github.com/omarqaterge/hermes-mobile-app/releases/latest/download/hermes-mobile.apk
+curl -fL -o hermes-mobile.apk https://github.com/litmaspatra/hermes-app-v2/releases/latest/download/hermes-mobile.apk
 adb install -r hermes-mobile.apk
 adb shell pm grant com.omarqaterge.hermesmobile com.termux.permission.RUN_COMMAND
 adb shell pm grant com.omarqaterge.hermesmobile android.permission.POST_NOTIFICATIONS

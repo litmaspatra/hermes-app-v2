@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Sets up Hermes + Hermes Mobile on an Android phone from a Mac or Linux computer, over adb. Plug the phone in with USB
 # debugging on, then:
-#   curl -fsSL https://raw.githubusercontent.com/omarqaterge/hermes-mobile-app/main/tools/setup-phone.sh -o setup-phone.sh && bash setup-phone.sh
+#   curl -fsSL https://raw.githubusercontent.com/litmaspatra/hermes-app-v2/main/tools/setup-phone.sh -o setup-phone.sh && bash setup-phone.sh
 # Windows: tools/setup-phone.ps1. What it does, step by step: AGENT_INSTALL.md (same steps, for AI agents).
 #
 # At the end it offers to set an API key. Skip it (Enter) to connect a model in the app instead, which also does
@@ -11,8 +11,8 @@
 # Options: -s <serial> picks a device when several are connected. Safe to run again.
 set -euo pipefail
 
-RAW="https://raw.githubusercontent.com/omarqaterge/hermes-mobile-app/main"
-APK_URL="https://github.com/omarqaterge/hermes-mobile-app/releases/latest/download/hermes-mobile.apk"
+RAW="https://raw.githubusercontent.com/litmaspatra/hermes-app-v2/main"
+APK_URL="https://github.com/litmaspatra/hermes-app-v2/releases/latest/download/hermes-mobile.apk"
 APP=com.omarqaterge.hermesmobile
 WORK="${HM_WORK:-$HOME/.hermes-mobile-setup}"
 mkdir -p "$WORK"

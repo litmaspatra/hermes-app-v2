@@ -3,7 +3,7 @@
 import { useSyncExternalStore } from 'react'
 import { appVersion, installUpdate } from './bridge'
 
-const REPO = 'omarqaterge/hermes-mobile-app'
+const REPO = 'litmaspatra/hermes-app-v2'
 
 export type UpdateState = {
   phase: 'idle' | 'checking' | 'uptodate' | 'available' | 'downloading' | 'installing' | 'permission' | 'error'

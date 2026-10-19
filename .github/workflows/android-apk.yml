@@ -7,7 +7,7 @@ name: Android APK (test build)
 on:
   workflow_dispatch:
   push:
-    branches: [feature/v2]
+    branches: [main, feature/v2]
 
 jobs:
   apk:
@@ -44,7 +44,7 @@ jobs:
           else
             echo "No KEYSTORE_B64 secret: using a throwaway test key"
           fi
-          VERSION_NAME="2.0.0-test" VERSION_CODE=$(( 20000 + GITHUB_RUN_NUMBER )) android/build.sh
+          VERSION_NAME="$(cat VERSION)-test" VERSION_CODE=$(( 20000 + GITHUB_RUN_NUMBER )) android/build.sh
           rm -f "$RUNNER_TEMP/release.keystore"
       - uses: actions/upload-artifact@v4
         with:

@@ -128,11 +128,11 @@ The install takes 15-40 minutes, mostly waiting.
 2. Open Termux and paste:
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/omarqaterge/hermes-mobile-app/main/phone/bootstrap.sh -o hm.sh && bash hm.sh
+   curl -fsSL https://raw.githubusercontent.com/litmaspatra/hermes-app-v2/main/phone/bootstrap.sh -o hm.sh && bash hm.sh
    ```
 
    Keep Termux open and the screen on until it prints `HMSETUP DONE`.
-3. Download **hermes-mobile.apk** from the [latest release](https://github.com/omarqaterge/hermes-mobile-app/releases/latest), install it
+3. Download **hermes-mobile.apk** from the [latest release](https://github.com/litmaspatra/hermes-app-v2/releases/latest), install it
    and open it.
 4. The app opens on **Connect Hermes to a model**: sign in with your subscription or paste an API key, then pick the model new
    chats use. You can change all of this later in **Settings → Subscriptions & accounts / API keys / Default models**.
@@ -147,12 +147,12 @@ plug it in and run:
 
 ```bash
 # Mac / Linux
-curl -fsSL https://raw.githubusercontent.com/omarqaterge/hermes-mobile-app/main/tools/setup-phone.sh -o setup-phone.sh && bash setup-phone.sh
+curl -fsSL https://raw.githubusercontent.com/litmaspatra/hermes-app-v2/main/tools/setup-phone.sh -o setup-phone.sh && bash setup-phone.sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://raw.githubusercontent.com/omarqaterge/hermes-mobile-app/main/tools/setup-phone.ps1 | iex
+irm https://raw.githubusercontent.com/litmaspatra/hermes-app-v2/main/tools/setup-phone.ps1 | iex
 ```
 
 It installs everything on the phone, including the app. At the end it offers to set an API key; press Enter to skip it and connect a
@@ -162,11 +162,11 @@ subscription or key in the app instead.
 script and fixes what goes wrong:
 
 ```text
-Read https://raw.githubusercontent.com/omarqaterge/hermes-mobile-app/main/AGENT_INSTALL.md and follow it to set up Hermes on my Android phone.
+Read https://raw.githubusercontent.com/litmaspatra/hermes-app-v2/main/AGENT_INSTALL.md and follow it to set up Hermes on my Android phone.
 ```
 
 > Tested end to end on a clean Android 15 emulator and piece by piece on a real phone, but not yet on a brand-new real phone.
-> If something fails, please [open an issue](https://github.com/omarqaterge/hermes-mobile-app/issues).
+> If something fails, please [open an issue](https://github.com/litmaspatra/hermes-app-v2/issues).
 
 ### After installing
 
@@ -227,7 +227,7 @@ You need **Node 20+**, **JDK 17** and the [Android command-line tools](https://d
 (`sdkmanager "platforms;android-36" "build-tools;35.0.0"`). No Gradle:
 
 ```bash
-git clone https://github.com/omarqaterge/hermes-mobile-app.git && cd hermes-mobile-app
+git clone https://github.com/litmaspatra/hermes-app-v2.git && cd hermes-app-v2
 (cd web && npm ci)
 ANDROID_HOME=/path/to/android-sdk JAVA_HOME=/path/to/jdk-17 VERSION_NAME=1.0.0 VERSION_CODE=1 android/build.sh
 adb install -r android/build/hermes-mobile.apk

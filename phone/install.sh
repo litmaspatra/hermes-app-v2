@@ -1,11 +1,11 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # One-step phone setup. Run it in TERMUX (not inside Debian):
-#   curl -fsSL https://raw.githubusercontent.com/omarqaterge/hermes-mobile-app/main/phone/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/litmaspatra/hermes-app-v2/main/phone/install.sh | bash
 # or, from a clone:  bash ~/hermes-mobile/phone/install.sh
 # It lets the app start Hermes, installs the Hermes Mobile plugin into Debian and the supervisor script into ~/bin,
 # then downloads the app and opens Android's installer. Safe to run again (it just refreshes everything).
 set -e
-REPO="https://github.com/omarqaterge/hermes-mobile-app"
+REPO="https://github.com/litmaspatra/hermes-app-v2"
 PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
 ROOT="$PREFIX/var/lib/proot-distro/containers/debian/rootfs/root"
 die() { echo "ERROR: $*" >&2; exit 1; }

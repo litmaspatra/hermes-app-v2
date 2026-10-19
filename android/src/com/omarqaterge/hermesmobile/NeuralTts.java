@@ -27,8 +27,8 @@ import java.util.concurrent.TimeUnit;
  */
 final class NeuralTts {
     static final int PORT = 8766;
-    static final String DEFAULT_VOICE = "en_US-lessac-medium";
-    private static final java.util.regex.Pattern VOICE = java.util.regex.Pattern.compile("^[a-z]{2,3}_[A-Za-z]{2,4}-[A-Za-z0-9_]+-(?:x_low|low|medium|high)$");
+    static final String DEFAULT_VOICE = "kokoro-af_heart";
+    private static final java.util.regex.Pattern VOICE = java.util.regex.Pattern.compile("^(?:kokoro-[a-z]{2}_[a-z]+|[a-z]{2,3}_[A-Za-z]{2,4}-[A-Za-z0-9_]+-(?:x_low|low|medium|high))$");
 
     static boolean validVoice(String v) {
         return v != null && VOICE.matcher(v).matches();
@@ -48,7 +48,11 @@ final class NeuralTts {
     }
 
     static String voice(Context c) {
-        String v = c.getSharedPreferences("hm", Context.MODE_PRIVATE).getString("tts_voice", DEFAULT_VOICE);
+        android.content.SharedPreferences sp = c.getSharedPreferences("hm", Context.MODE_PRIVATE);
+        if (!sp.getBoolean("tts_kokoro_default", false)) { // once: move off the old Piper voice to the Kokoro default
+            sp.edit().putString("tts_voice", DEFAULT_VOICE).putBoolean("tts_kokoro_default", true).apply();
+        }
+        String v = sp.getString("tts_voice", DEFAULT_VOICE);
         return validVoice(v) ? v : DEFAULT_VOICE;
     }
 
@@ -207,7 +211,7 @@ final class NeuralTts {
         }
     }
 
-    /** Voices installed on the server (Piper names like en_US-lessac-medium); empty if it isn't reachable. Blocking. */
+    /** Voices installed on the server (Kokoro names like kokoro-af_heart, or Piper names); empty if it isn't reachable. Blocking. */
     static String voices(Context c) {
         HttpURLConnection h = null;
         try {

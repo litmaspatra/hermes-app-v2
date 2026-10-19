@@ -176,9 +176,15 @@ function NaturalVoice() {
     }, 50)
   }, [])
   if (!hasNativeV2() || !s) return null
-  const pretty = (v: string) => v.replace(/^([a-z]{2})_([A-Za-z]+)-/, '$1-$2 · ').replace(/-(x_low|low|medium|high)$/, ' ($1)').replace(/_/g, ' ')
+  const KOKORO: Record<string, string> = { a: 'US English', b: 'British', h: 'Hindi' }
+  const pretty = (v: string) => {
+    const k = /^kokoro-([abh])([fm])_([a-z]+)$/.exec(v)
+    if (k) return `${k[3][0].toUpperCase()}${k[3].slice(1)} · ${KOKORO[k[1]]} ${k[2] === 'f' ? 'female' : 'male'}`
+    return prettyPiper(v)
+  }
+  const prettyPiper = (v: string) => v.replace(/^([a-z]{2})_([A-Za-z]+)-/, '$1-$2 · ').replace(/-(x_low|low|medium|high)$/, ' ($1)').replace(/_/g, ' ')
   return (
-    <Section title="Natural voice" footer={`${status || 'Checking…'} Piper is an open-source voice (20–65 MB per voice) that runs on the phone; it breathes between phrases and slows down for bad news. If its server isn't running the phone's own voice is used. The Voice and brain doctor (Voice commands page) installs it and four voices by itself.`}>
+    <Section title="Natural voice" footer={`${status || 'Checking…'} Kokoro is an open-source neural voice that runs on the phone (about 120 MB, English and Hindi voices); it breathes between phrases and slows down for bad news. If its server isn't running the phone's own voice is used. The Voice and brain doctor (Voice commands page) installs it by itself.`}>
       <ToggleRow icon="🗣" tone="blue" title="Use the natural voice" sub="Read-aloud and spoken replies" on={s.voice_neural} onChange={v => set('voice_neural', v)} />
       {voices.length > 0 && (
         <SelectRow icon="🎙" tone="purple" title="Natural voice" options={voices.map(v => ({ value: v, label: pretty(v) }))} value={s.tts_voice} placeholder="Choose" onChange={v => { setTtsVoice(v); set('voice_neural', true) }} />
@@ -324,7 +330,7 @@ export function VoiceCommandsPage() {
             <ToggleRow icon="🔁" tone="gold" title="Keep listening after Hermes answers" on={s.voice_follow} onChange={v => set('voice_follow', v)} />
             <Row icon="🩺" tone="teal" title="Test FastBrain connection" onClick={() => toast(fastbrainStatus(), 'info')} />
           </Section>
-          <Section title="Voice and brain doctor" footer="Checks FastBrain, the MiniLM brain, Piper with its four voices and memory, and installs or starts what is missing. It also runs by itself when the app starts.">
+          <Section title="Voice and brain doctor" footer="Checks FastBrain, the MiniLM brain, the Kokoro natural voice and memory, and installs or starts what is missing. It also runs by itself when the app starts.">
             <DoctorPanel />
           </Section>
           <AliasEditor />

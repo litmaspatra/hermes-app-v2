@@ -37,8 +37,183 @@ FB_PORT, TTS_PORT, CONTROL_PORT = 8765, 8766, 8767
 FB_HOME = Path(os.environ.get("FASTBRAIN_HOME", str(HOME / ".fastbrain")))
 STATE_DIR = Path(os.environ.get("HM_STATE_DIR", str(HOME / ".hermes-mobile")))
 VOICE_DIR = Path(os.environ.get("PIPER_VOICES_DIR", str(HOME / ".piper-voices")))
-# Mandatory voices: two female, two male-ish mix, all medium quality (about 60 MB each).
-VOICES_WANTED = ("en_US-lessac-medium", "en_US-ryan-medium", "en_US-amy-medium", "en_GB-alan-medium")
+KOKORO_DIR = STATE_DIR / "kokoro"
+KOKORO_BASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/"
+KOKORO_FILES = {"kokoro-v1.0.int8.onnx": 80_000_000, "voices-v1.0.bin": 20_000_000}  # name -> minimum plausible size
+TTS_SERVER_SRC = r'''#!/usr/bin/env python3
+"""Local voice server on 127.0.0.1:8766 (same API as the old Piper server): Kokoro first, Piper voices as a fallback."""
+import argparse, hmac, io, os, sys, threading, urllib.parse, wave
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+HOME = Path.home()
+STATE = Path(os.environ.get("HM_STATE_DIR", str(HOME / ".hermes-mobile")))
+KDIR = STATE / "kokoro"
+MODEL, VOICES = KDIR / "kokoro-v1.0.int8.onnx", KDIR / "voices-v1.0.bin"
+# English first, then Hindi; every one of these is inside voices-v1.0.bin
+WANTED = ["af_heart", "af_bella", "af_nicole", "af_sarah", "af_sky", "am_adam", "am_michael", "bf_emma", "bf_isabella", "bm_george", "bm_lewis",
+          "hf_alpha", "hf_beta", "hm_omega", "hm_psi"]
+DEFAULT = "kokoro-af_heart"
+_lock = threading.Lock()
+_k = None
+_piper = {}
+
+
+def lang(v: str) -> str:
+    return {"a": "en-us", "b": "en-gb", "h": "hi"}.get(v[:1], "en-us")
+
+
+def kokoro():
+    global _k
+    if _k is None:
+        from kokoro_onnx import Kokoro
+        _k = Kokoro(str(MODEL), str(VOICES))
+    return _k
+
+
+def kokoro_ready() -> bool:
+    return MODEL.is_file() and VOICES.is_file()
+
+
+def piper_catalog() -> dict:
+    out = {}
+    for d in (STATE.parent / ".piper-voices", HOME / "piper-voices", HOME / ".hermes" / "cache" / "piper-voices"):
+        for p in sorted(d.glob("*.onnx")) if d.is_dir() else []:
+            if p.with_name(p.name + ".json").exists():
+                out.setdefault(p.stem, p)
+    return out
+
+
+def names() -> list:
+    out = []
+    if kokoro_ready():
+        try:
+            have = set(kokoro().get_voices())
+            out += ["kokoro-" + v for v in WANTED if v in have]
+        except Exception:
+            pass
+    return out + sorted(piper_catalog())
+
+
+def to_wav(a, rate: int) -> bytes:
+    import numpy as np
+    a = np.asarray(a, dtype="float32").reshape(-1)
+    idx = np.flatnonzero(np.abs(a) > 0.01)
+    if idx.size:  # silence trimmed at both ends: the app adds its own pauses
+        a = a[max(0, idx[0] - int(rate * 0.01)): idx[-1] + int(rate * 0.03)]
+    pcm = (np.clip(a, -1, 1) * 32767).astype("<i2").tobytes()
+    out = io.BytesIO()
+    with wave.open(out, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(pcm)
+    return out.getvalue()
+
+
+def synth(voice: str, text: str, speed: float) -> bytes:
+    speed = max(0.5, min(1.8, speed))
+    if voice.startswith("kokoro-") and kokoro_ready():
+        v = voice[7:]
+        a, rate = kokoro().create(text, voice=v, speed=speed, lang=lang(v))
+        return to_wav(a, rate)
+    cat = piper_catalog()
+    name = voice if voice in cat else (sorted(cat)[0] if cat else "")
+    if not name:
+        if kokoro_ready():  # unknown or old voice name: speak in the default Kokoro voice instead of failing
+            a, rate = kokoro().create(text, voice=DEFAULT[7:], speed=speed, lang="en-us")
+            return to_wav(a, rate)
+        raise LookupError("no voice")
+    import numpy as np
+    from piper import PiperVoice, SynthesisConfig
+    if name not in _piper:
+        _piper[name] = PiperVoice.load(cat[name])
+    cfg = SynthesisConfig(length_scale=1.0 / speed, noise_w_scale=0.9)
+    parts, rate = [], 22050
+    for c in _piper[name].synthesize(text, cfg):
+        rate = c.sample_rate
+        parts.append(np.asarray(c.audio_float_array, dtype="float32").reshape(-1))
+    return to_wav(np.concatenate(parts) if parts else np.zeros(0, dtype="float32"), rate)
+
+
+def make_handler(key_path: Path):
+    class H(BaseHTTPRequestHandler):
+        timeout = 20
+
+        def log_message(self, *a):
+            return
+
+        def _send(self, code, body, ctype="application/json"):
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _ok(self):
+            try:
+                key = key_path.read_text().strip()
+            except OSError:
+                key = ""
+            return bool(key) and hmac.compare_digest(key.encode(), self.headers.get("X-Hermes-Mobile-Key", "").encode())
+
+        def do_GET(self):
+            if self.path not in ("/health", "/voices"):
+                return self._send(404, b"{}")
+            if not self._ok():
+                return self._send(403, b"{}")
+            with _lock:
+                n = names()
+            if self.path == "/voices":
+                return self._send(200, "\n".join(n).encode(), "text/plain")
+            self._send(200 if n else 503, b'{"ok":true}' if n else b'{"ok":false,"error":"no_voice_installed"}')
+
+        def do_POST(self):
+            if self.path != "/tts":
+                return self._send(404, b"{}")
+            if not self._ok():
+                return self._send(403, b"{}")
+            try:
+                n = int(self.headers.get("Content-Length", "0") or 0)
+                if n <= 0 or n > 20000:
+                    return self._send(413, b"{}")
+                f = urllib.parse.parse_qs(self.rfile.read(n).decode("utf-8", "replace"))
+                text = (f.get("text") or [""])[0].strip()[:600]
+                speed = float((f.get("speed") or ["1.0"])[0])
+                if not text:
+                    return self._send(400, b"{}")
+                with _lock:
+                    wav = synth((f.get("voice") or [DEFAULT])[0], text, speed)
+                self._send(200, wav, "audio/wav")
+            except LookupError:
+                self._send(503, b'{"error":"no_voice_installed"}')
+            except Exception as exc:
+                self._send(500, ('{"error":"%s"}' % type(exc).__name__).encode())
+    return H
+
+
+def main() -> int:
+    p = argparse.ArgumentParser()
+    p.add_argument("--port", type=int, default=8766)
+    p.add_argument("--key-file", default=os.environ.get("HERMES_MOBILE_KEY_FILE", "/data/data/com.termux/files/home/.hermes-mobile/key"))
+    a = p.parse_args()
+    srv = ThreadingHTTPServer(("127.0.0.1", a.port), make_handler(Path(a.key_file)))
+    srv.daemon_threads = True
+    if kokoro_ready():
+        try:  # load now and say hello once, so the first real sentence isn't the slow one
+            with _lock:
+                synth(DEFAULT, "Ready.", 1.0)
+        except Exception as e:
+            print("kokoro warm-up failed:", type(e).__name__, e, flush=True)
+    print(f"voice server on 127.0.0.1:{a.port}, voices: {names()}", flush=True)
+    srv.serve_forever()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
+
 FASTBRAIN_REPO = "https://github.com/litmaspatra/FastBrain"
 MINILM_BASE = "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/"
 MINILM_FILES = {"model_qint8_arm64.onnx": "onnx/model_qint8_arm64.onnx?download=true", "vocab.txt": "vocab.txt?download=true"}
@@ -163,6 +338,34 @@ def fastbrain_dirs() -> list[str]:
     return [str(p) for p in [HOME / "FastBrain", *HOME.glob("*/FastBrain")] if (p / "scripts").is_dir()]
 
 
+def kokoro_py() -> str | None:
+    for p in pythons(str(STATE_DIR / "venv" / "bin" / "python"), "python3", sys.executable):
+        if py_ok(p, "import kokoro_onnx"):
+            return p
+    return None
+
+
+def kokoro_files_ok() -> bool:
+    return all((KOKORO_DIR / n).is_file() and (KOKORO_DIR / n).stat().st_size >= m for n, m in KOKORO_FILES.items())
+
+
+def write_tts_server() -> Path:
+    p = STATE_DIR / "tts_server.py"
+    if not p.is_file() or p.read_text() != TTS_SERVER_SRC:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        p.write_text(TTS_SERVER_SRC)
+    return p
+
+
+def tts_voices() -> list[str]:
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{TTS_PORT}/voices", headers={"X-Hermes-Mobile-Key": read_key()})
+        with urllib.request.urlopen(req, timeout=4) as r:
+            return r.read().decode().split()
+    except Exception:
+        return []
+
+
 def voice_dirs() -> list[Path]:
     return [VOICE_DIR, HOME / "piper-voices", HOME / ".hermes" / "cache" / "piper-voices", HOME / "FastBrain" / "piper-voices"]
 
@@ -246,11 +449,15 @@ def ensure() -> list[str]:
         if minilm_enabled() and minilm_files_ok() and not minilm_up() and (FB_HOME / "bin" / "start-minilm").is_file():
             rc, _ = run(["bash", str(FB_HOME / "bin" / "start-minilm")], 40)
             did.append("minilm")
-        if not port_open(TTS_PORT) and voices_found():
-            pp = piper_py()
-            if pp:
-                spawn("piper", [pp, str(root / "scripts" / "piper-tts-server.py")], FB_HOME / "router" / "piper.log")
-                did.append("piper")
+    ready = kokoro_files_ok() and kokoro_py() is not None
+    if ready and port_open(TTS_PORT) and not any(v.startswith("kokoro-") for v in tts_voices()):
+        run(["pkill", "-f", "piper-tts-server.py"], 10)  # the old Piper-only server holds the port: Kokoro replaces it
+        time.sleep(1)
+    if not port_open(TTS_PORT) and (ready or voices_found()):
+        py = kokoro_py() if ready else piper_py()
+        if py:
+            spawn("tts", [py, str(write_tts_server()), "--port", str(TTS_PORT)], STATE_DIR / "tts.log")
+            did.append("voice server")
     return did
 
 
@@ -321,12 +528,14 @@ def diagnose() -> dict:
     add("minilm_files", "MiniLM model files", minilm_files_ok(), "model_qint8_arm64.onnx and vocab.txt are missing (about 23 MB).")
     add("minilm_on", "MiniLM is the semantic brain", minilm_enabled(), "FastBrain's env does not use MiniLM.")
     add("minilm_up", "MiniLM service running", minilm_up(), "The MiniLM service is down.")
-    pp = piper_py()
-    add("piper_pkg", "Piper installed", pp is not None, "piper-tts is not installed for any Python here.")
-    have = voices_found()
-    need = [v for v in VOICES_WANTED if v not in have]
-    add("voices", f"Voices ({len(VOICES_WANTED) - len(need)}/{len(VOICES_WANTED)})", not need, "Missing: " + ", ".join(need) if need else "")
-    add("piper_up", "Piper voice server (8766)", http_code(TTS_PORT) == 200, "The voice server is down.")
+    add("kokoro_pkg", "Kokoro voice engine installed", kokoro_py() is not None, "kokoro-onnx is not installed for any Python here.")
+    add("kokoro_files", "Kokoro voice files (about 120 MB)", kokoro_files_ok(), "The model and voice pack are missing.")
+    kv = [v for v in tts_voices() if v.startswith("kokoro-")]
+    up = http_code(TTS_PORT) == 200
+    add("piper_up", "Natural voice server (8766)", up and bool(kv) if kokoro_files_ok() else up,
+        "The voice server is down." if not up else "An old Piper-only server holds the port; the doctor replaces it.")
+    have = {v: None for v in kv}
+    need = []
     cfg = hindsight_config()
     hp = hermes_py()
     add("hindsight", "Hindsight Lite present", hp is not None and py_ok(hp, "import hindsight_lite"), "Hindsight Lite is not importable in Hermes' Python.", fix=False)
@@ -409,17 +618,18 @@ def fix_all() -> None:
             _step("Linking FastBrain to Hindsight Lite")
             envf = FB_HOME / "fastbrain.env"
             envf.write_text(env_text().rstrip("\n") + f'\nFASTBRAIN_HINDSIGHT_CMD="{hp} {FB_HOME / "bin" / "hindsight-direct.py"}"\n')
-        # 3. Piper + voices
-        if piper_py() is None:
-            _step("Installing Piper")
-            _pip(["piper-tts", "numpy"])
-        pp = piper_py()
-        if pp:
-            have = voices_found()
-            for v in VOICES_WANTED:
-                if v not in have:
-                    _step(f"Downloading voice {v}")
-                    run([pp, "-m", "piper.download_voices", "--download-dir", str(VOICE_DIR), v], 900)
+        # 3. Kokoro (natural voice) + its voice pack
+        if kokoro_py() is None:
+            _step("Installing Kokoro (voice engine)")
+            _pip(["kokoro-onnx"])
+        for name, minsize in KOKORO_FILES.items():
+            dest = KOKORO_DIR / name
+            if not (dest.is_file() and dest.stat().st_size >= minsize):
+                _step(f"Downloading {name}")
+                _download(KOKORO_BASE + name, dest, 900)
+                if dest.is_file() and dest.stat().st_size < minsize:
+                    dest.unlink()
+        write_tts_server()
         # 4. start everything and check it
         _step("Starting services")
         for _ in range(3):

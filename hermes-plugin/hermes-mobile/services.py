@@ -506,6 +506,20 @@ def _norm_url(u: str) -> str:
     return u.strip().strip("'\"").rstrip("/").lower().replace("//localhost", "//127.0.0.1")
 
 
+def key_present(name: str) -> bool:
+    """True if `name` has a non-empty value in this process or in ~/.hermes/.env (Hermes loads that file itself). Never returns the value."""
+    if os.environ.get(name):
+        return True
+    try:
+        for line in (HOME / ".hermes" / ".env").read_text().splitlines():
+            k, sep, v = line.strip().removeprefix("export ").partition("=")
+            if sep and k.strip() == name and v.strip().strip("'\""):
+                return True
+    except OSError:
+        pass
+    return False
+
+
 def hermes_llm_url() -> str:
     """model.base_url from Hermes' config.yaml (the one LLM endpoint setting); no YAML library needed."""
     try:
@@ -632,8 +646,8 @@ def diagnose() -> dict:
     env_name = cfg.get("llm_api_key_env", "")
     add("llm_endpoint", "One LLM endpoint for Hermes and memory", bool(hu) and _norm_url(hl) == _norm_url(hu),
         f"Hermes uses {hu or '(not set)'} but hindsight-lite/config.json llm_base_url is {hl or '(not set)'}. Make them the same.", fix=False)
-    add("llm_key", "LLM key visible to Hermes", bool(env_name) and bool(os.environ.get(env_name)),
-        "llm_api_key_env is not set in hindsight-lite/config.json." if not env_name else f"{env_name} is not set in Hermes' environment.", fix=False)
+    add("llm_key", "LLM key is set for Hermes", bool(env_name) and key_present(env_name),
+        "llm_api_key_env is not set in hindsight-lite/config.json." if not env_name else f"{env_name} has no value in ~/.hermes/.env.", fix=False)
     fb = router_health()
     add("fastbrain_api", "FastBrain reports its version", bool(fb.get("version")), "FastBrain is down, or too old to report a version. Update it if the router check above is green.", fix=False)
     n = len(read_aliases())

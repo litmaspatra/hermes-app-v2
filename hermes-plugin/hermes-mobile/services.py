@@ -313,7 +313,7 @@ def py313() -> str | None:
     return None
 
 
-def piper_py() -> str | None:
+def _piper_py() -> str | None:
     for p in pythons(str(STATE_DIR / "venv" / "bin" / "python"), sys.executable, "python3"):
         if py_ok(p, "import piper"):
             return p
@@ -338,11 +338,19 @@ def fastbrain_dirs() -> list[str]:
     return [str(p) for p in [HOME / "FastBrain", *HOME.glob("*/FastBrain")] if (p / "scripts").is_dir()]
 
 
-def kokoro_py() -> str | None:
+def _kokoro_py() -> str | None:
     for p in pythons(str(STATE_DIR / "venv" / "bin" / "python"), "python3", sys.executable):
         if py_ok(p, "import kokoro_onnx"):
             return p
     return None
+
+
+def kokoro_py() -> str | None:
+    return cached("kokoro_py", _kokoro_py)
+
+
+def piper_py() -> str | None:
+    return cached("piper_py", _piper_py)
 
 
 def kokoro_files_ok() -> bool:
@@ -434,6 +442,81 @@ def hindsight_config() -> dict:
         return {}
 
 
+_cache: dict[str, tuple[float, object]] = {}
+
+
+def cached(key: str, fn, ok_ttl: float = 600.0, bad_ttl: float = 20.0):
+    """Remember a slow probe (it spawns a Python process) so the 20 s loop and the doctor don't repeat it."""
+    hit = _cache.get(key)
+    if hit and time.time() - hit[0] < (ok_ttl if hit[1] else bad_ttl):
+        return hit[1]
+    v = fn()
+    _cache[key] = (time.time(), v)
+    return v
+
+
+_svc: dict[str, dict] = {}
+
+
+def _note_start(name: str, err: str = "") -> None:
+    s = _svc.setdefault(name, {"starts": 0, "last_start": 0.0, "error": ""})
+    s["starts"] += 1
+    s["last_start"] = time.time()
+    s["error"] = err
+    _log(f"start {name}" + (f": {err}" if err else ""))
+
+
+def service_states() -> dict:
+    """Cheap per-service health (port and socket checks only): up, starting (started in the last 60 s) or down."""
+    probes = {"router": router_up, "bridge": lambda: port_open(FB_PORT), "tts": lambda: port_open(TTS_PORT)}
+    if minilm_enabled():
+        probes["minilm"] = minilm_up
+    out = {}
+    for name, probe in probes.items():
+        s = _svc.get(name, {})
+        up = bool(probe())
+        fresh = time.time() - s.get("last_start", 0.0) < 60
+        out[name] = {"state": "up" if up else ("starting" if fresh else "down"), "starts": s.get("starts", 0), "error": s.get("error", "")}
+    return out
+
+
+def router_health() -> dict:
+    """The router's own /health JSON (version, capabilities); {} when it is down or answers in the old format."""
+    s = router_sock()
+    if not s.exists():
+        return {}
+    try:
+        c = socket.socket(socket.AF_UNIX)
+        c.settimeout(1.5)
+        c.connect(str(s))
+        c.sendall(b"GET /health HTTP/1.0\r\n\r\n")
+        raw = b""
+        while len(raw) < 16384:
+            part = c.recv(4096)
+            if not part:
+                break
+            raw += part
+        c.close()
+        return json.loads(raw.partition(b"\r\n\r\n")[2].decode("utf-8", "replace") or "{}")
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _norm_url(u: str) -> str:
+    return u.strip().strip("'\"").rstrip("/").lower().replace("//localhost", "//127.0.0.1")
+
+
+def hermes_llm_url() -> str:
+    """model.base_url from Hermes' config.yaml (the one LLM endpoint setting); no YAML library needed."""
+    try:
+        txt = (HOME / ".hermes" / "config.yaml").read_text()
+    except OSError:
+        return ""
+    blk = re.search(r"^model:[ \t]*\n((?:[ \t]+.*\n?)+)", txt, re.M)
+    u = re.search(r"^[ \t]+base_url:[ \t]*(\S+)", blk.group(1), re.M) if blk else None
+    return u.group(1) if u else ""
+
+
 # ------------------------------------------------------------------ keep things running
 def ensure() -> list[str]:
     """Start whatever is down (never restarts something that is up). Returns what it did."""
@@ -441,14 +524,17 @@ def ensure() -> list[str]:
     root = fastbrain_root()
     if root is not None and (FB_HOME / "app").is_dir():
         if not router_up():
-            rc, out = run(["bash", str(root / "scripts" / "start-fastbrain-router.sh")], 60)
+            rc, out = run(["bash", str(root / "scripts" / "start-fastbrain-router.sh")], 60, env={"FASTBRAIN_SKIP_APP_BRIDGES": "1"})
             did.append("router" + ("" if rc == 0 else f" (failed: {out[-200:]})"))
+            _note_start("router", "" if rc == 0 else out[-200:])
         if not port_open(FB_PORT):
             spawn("bridge", [sys.executable, str(root / "scripts" / "fastbrain-router-tcp.py"), "--socket", str(router_sock())], FB_HOME / "router" / "tcp.log")
             did.append("bridge")
+            _note_start("bridge")
         if minilm_enabled() and minilm_files_ok() and not minilm_up() and (FB_HOME / "bin" / "start-minilm").is_file():
             rc, _ = run(["bash", str(FB_HOME / "bin" / "start-minilm")], 40)
             did.append("minilm")
+            _note_start("minilm", "" if rc == 0 else "start-minilm failed")
     ready = kokoro_files_ok() and kokoro_py() is not None
     if ready and port_open(TTS_PORT) and not any(v.startswith("kokoro-") for v in tts_voices()):
         run(["pkill", "-f", "piper-tts-server.py"], 10)  # the old Piper-only server holds the port: Kokoro replaces it
@@ -458,6 +544,7 @@ def ensure() -> list[str]:
         if py:
             spawn("tts", [py, str(write_tts_server()), "--port", str(TTS_PORT)], STATE_DIR / "tts.log")
             did.append("voice server")
+            _note_start("tts")
     return did
 
 
@@ -538,12 +625,20 @@ def diagnose() -> dict:
     need = []
     cfg = hindsight_config()
     hp = hermes_py()
-    add("hindsight", "Hindsight Lite present", hp is not None and py_ok(hp, "import hindsight_lite"), "Hindsight Lite is not importable in Hermes' Python.", fix=False)
+    add("hindsight", "Hindsight Lite present", hp is not None and cached("hindsight", lambda: py_ok(hp, "import hindsight_lite")), "Hindsight Lite is not importable in Hermes' Python.", fix=False)
     add("memory_write", "Hermes can save new memories on its own", bool(cfg.get("llm_model")),
         "hindsight-lite/config.json has no llm_model, so automatic retention is OFF: only an explicit hmem_remember saves. Set llm_base_url + llm_model (any small chat model).", fix=False)
+    hl, hu = cfg.get("llm_base_url", ""), hermes_llm_url()
+    env_name = cfg.get("llm_api_key_env", "")
+    add("llm_endpoint", "One LLM endpoint for Hermes and memory", bool(hu) and _norm_url(hl) == _norm_url(hu),
+        f"Hermes uses {hu or '(not set)'} but hindsight-lite/config.json llm_base_url is {hl or '(not set)'}. Make them the same.", fix=False)
+    add("llm_key", "LLM key visible to Hermes", bool(env_name) and bool(os.environ.get(env_name)),
+        "llm_api_key_env is not set in hindsight-lite/config.json." if not env_name else f"{env_name} is not set in Hermes' environment.", fix=False)
+    fb = router_health()
+    add("fastbrain_api", "FastBrain reports its version", bool(fb.get("version")), "FastBrain is down, or too old to report a version. Update it if the router check above is green.", fix=False)
     n = len(read_aliases())
     return {"ok": all(c["ok"] for c in checks if c["id"] not in ("dup_fastbrain",)), "checks": checks, "voices": sorted(have), "aliases": n,
-            "task": dict(_task), "time": int(time.time())}
+            "services": service_states(), "fastbrain": fb, "task": dict(_task), "time": int(time.time())}
 
 
 def _step(msg: str) -> None:
@@ -631,6 +726,7 @@ def fix_all() -> None:
                     dest.unlink()
         write_tts_server()
         # 4. start everything and check it
+        _cache.clear()
         _step("Starting services")
         for _ in range(3):
             ensure()
@@ -859,7 +955,7 @@ class Handler(BaseHTTPRequestHandler):
         q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
         try:
             if u.path == "/health":
-                return self._json({"ok": True, "v": 1})
+                return self._json({"ok": True, "v": 2, "services": service_states()})
             if u.path == "/status":
                 return self._json(diagnose())
             if u.path == "/aliases":

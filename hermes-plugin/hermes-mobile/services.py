@@ -476,7 +476,7 @@ def service_states() -> dict:
         s = _svc.get(name, {})
         up = bool(probe())
         fresh = time.time() - s.get("last_start", 0.0) < 60
-        out[name] = {"state": "up" if up else ("starting" if fresh else "down"), "starts": s.get("starts", 0), "error": s.get("error", "")}
+        out[name] = {"state": "up" if up else ("starting" if fresh else "down"), "starts": s.get("starts", 0), "error": "" if up else s.get("error", "")}
     return out
 
 

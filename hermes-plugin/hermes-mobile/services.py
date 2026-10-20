@@ -321,7 +321,9 @@ def _piper_py() -> str | None:
 
 
 def hermes_py() -> str | None:
-    for p in pythons(str(HOME / ".hermes" / "hermes-agent" / "venv" / "bin" / "python")):
+    """Hermes' own Python: the old venv if present, else the standalone interpreter newer installs run from (~/.hermes/tools)."""
+    tools = sorted((HOME / ".hermes" / "tools").glob("python-*/bin/python3"), reverse=True)
+    for p in pythons(str(HOME / ".hermes" / "hermes-agent" / "venv" / "bin" / "python"), *map(str, tools)):
         return p
     return None
 

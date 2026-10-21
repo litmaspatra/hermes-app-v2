@@ -40,6 +40,56 @@ VOICE_DIR = Path(os.environ.get("PIPER_VOICES_DIR", str(HOME / ".piper-voices"))
 KOKORO_DIR = STATE_DIR / "kokoro"
 KOKORO_BASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/"
 KOKORO_FILES = {"kokoro-v1.0.int8.onnx": 80_000_000, "voices-v1.0.bin": 20_000_000}  # name -> minimum plausible size
+
+# --- P2a: pinned, resumable, verified Kokoro download ---
+KOKORO_PIN = {
+    "kokoro-v1.0.int8.onnx": (92_361_271, "6e742170d309016e5891a994e1ce1559c702a2ccd0075e67ef7157974f6406cb"),
+    "voices-v1.0.bin":       (28_214_398, "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d"),
+}
+
+
+def _fetch_verified(url, dest, size, sha256, tries=4):
+    """Resumable, checksummed download. Network failure keeps .part so the
+    next call resumes; a size/hash mismatch deletes it. Raises on final failure."""
+    import hashlib, http.client, shutil, time, urllib.request
+    from pathlib import Path
+    dest = Path(dest)
+    part = dest.with_name(dest.name + ".part")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    have = part.stat().st_size if part.exists() else 0
+    free = shutil.disk_usage(dest.parent).free
+    if free < (size - have) + 300_000_000:
+        raise RuntimeError("Not enough free space: need about %d MB, have %d MB"
+                           % ((size - have + 300_000_000) // 1_000_000, free // 1_000_000))
+    last = None
+    for attempt in range(tries):
+        try:
+            have = part.stat().st_size if part.exists() else 0
+            if have > size:
+                part.unlink()
+                have = 0
+            if have < size:
+                hdr = {"Range": "bytes=%d-" % have} if have else {}
+                req = urllib.request.Request(url, headers=hdr)
+                with urllib.request.urlopen(req, timeout=60) as r:
+                    resumed = bool(have) and getattr(r, "status", 200) == 206
+                    with open(part, "ab" if resumed else "wb") as f:
+                        shutil.copyfileobj(r, f, 1 << 20)
+            h = hashlib.sha256()
+            with open(part, "rb") as f:
+                for chunk in iter(lambda: f.read(1 << 20), b""):
+                    h.update(chunk)
+            if part.stat().st_size != size or h.hexdigest() != sha256:
+                part.unlink()
+                raise ValueError("checksum/size mismatch for " + dest.name)
+            part.replace(dest)
+            return
+        except (OSError, http.client.HTTPException, ValueError) as e:
+            last = e
+            time.sleep(2 ** (attempt + 1))
+    raise RuntimeError("Download of %s failed after %d tries: %s" % (dest.name, tries, last))
+# --- end P2a ---
+
 TTS_SERVER_SRC = r'''#!/usr/bin/env python3
 """Local voice server on 127.0.0.1:8766 (same API as the old Piper server): Kokoro first, Piper voices as a fallback."""
 import argparse, hmac, io, os, sys, threading, urllib.parse, wave
@@ -733,13 +783,16 @@ def fix_all() -> None:
         if kokoro_py() is None:
             _step("Installing Kokoro (voice engine)")
             _pip(["kokoro-onnx"])
-        for name, minsize in KOKORO_FILES.items():
+        for name, (ksize, ksha) in KOKORO_PIN.items():
             dest = KOKORO_DIR / name
-            if not (dest.is_file() and dest.stat().st_size >= minsize):
-                _step(f"Downloading {name}")
-                _download(KOKORO_BASE + name, dest, 900)
-                if dest.is_file() and dest.stat().st_size < minsize:
-                    dest.unlink()
+            if dest.is_file() and dest.stat().st_size == ksize:
+                continue
+            _step(f"Downloading {name} ({ksize // 1_000_000} MB)")
+            try:
+                _fetch_verified(KOKORO_BASE + name, dest, ksize, ksha)
+            except Exception as e:
+                _step(f"Kokoro download failed: {e}")
+                break
         write_tts_server()
         # 4. start everything and check it
         _cache.clear()

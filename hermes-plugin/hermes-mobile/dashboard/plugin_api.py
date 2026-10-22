@@ -125,6 +125,46 @@ async def edit_memory(body: MemoryEdit, profile: Optional[str] = None):
     return {"result": result, body.target: _snapshot(fresh, body.target)}
 
 
+def _provider(home: Path) -> str:
+    try:
+        import yaml
+
+        cfg = yaml.safe_load((home / "config.yaml").read_text(encoding="utf-8")) or {}
+        return str((cfg.get("memory") or {}).get("provider") or "")
+    except Exception:
+        return ""
+
+
+@router.get("/memory/recall")
+async def recall_memory(q: str, limit: int = 8, profile: Optional[str] = None):
+    """Search the active memory provider. Hindsight Lite only for now (keyword/entity/graph arms, no embeddings)."""
+    import asyncio
+
+    home = _home(profile)
+    provider = _provider(home)
+    q = q.strip()[:500]
+    if provider != "hindsight-lite":
+        return {"provider": provider, "supported": False, "results": []}
+    db = home / "hindsight-lite" / "memory.db"
+    if not q or not db.exists():
+        return {"provider": provider, "supported": True, "results": []}
+
+    def work():
+        from hindsight_lite.db import MemoryStore as HStore
+        from hindsight_lite.retrieval import RetrievalEngine
+
+        return RetrievalEngine(HStore(db)).recall(q, limit=max(1, min(limit, 20)))
+
+    hits = await asyncio.to_thread(work)
+    return {
+        "provider": provider,
+        "supported": True,
+        "results": [
+            {"memory_id": h.memory_id, "content": h.content, "score": h.score, "sources": list(h.sources)} for h in hits
+        ],
+    }
+
+
 # ── Always-on bots (see ../bots.py; the keeper process does the starting/stopping) ──
 
 

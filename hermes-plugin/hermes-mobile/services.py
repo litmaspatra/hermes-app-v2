@@ -89,6 +89,7 @@ def _fetch_verified(url, dest, size, sha256, tries=4):
             time.sleep(2 ** (attempt + 1))
     raise RuntimeError("Download of %s failed after %d tries: %s" % (dest.name, tries, last))
 # --- end P2a ---
+_KOKORO_ERR = {"msg": ""}
 
 TTS_SERVER_SRC = r'''#!/usr/bin/env python3
 """Local voice server on 127.0.0.1:8766 (same API as the old Piper server): Kokoro first, Piper voices as a fallback."""
@@ -212,8 +213,7 @@ def make_handler(key_path: Path):
                 return self._send(404, b"{}")
             if not self._ok():
                 return self._send(403, b"{}")
-            with _lock:
-                n = names()
+            n = names()  # no synthesis lock: status must answer while speech is being made
             if self.path == "/voices":
                 return self._send(200, "\n".join(n).encode(), "text/plain")
             self._send(200 if n else 503, b'{"ok":true}' if n else b'{"ok":false,"error":"no_voice_installed"}')
@@ -682,7 +682,7 @@ def diagnose() -> dict:
     add("minilm_on", "MiniLM is the semantic brain", minilm_enabled(), "FastBrain's env does not use MiniLM.")
     add("minilm_up", "MiniLM service running", minilm_up(), "The MiniLM service is down.")
     add("kokoro_pkg", "Kokoro voice engine installed", kokoro_py() is not None, "kokoro-onnx is not installed for any Python here.")
-    add("kokoro_files", "Kokoro voice files (about 120 MB)", kokoro_files_ok(), "The model and voice pack are missing.")
+    add("kokoro_files", "Kokoro voice files (about 120 MB)", kokoro_files_ok(), (("Download failed: " + _KOKORO_ERR["msg"] + ". ") if _KOKORO_ERR["msg"] else "The model and voice pack are missing. ") + "Until they are downloaded, speech uses the phone's own voice.")
     kv = [v for v in tts_voices() if v.startswith("kokoro-")]
     up = http_code(TTS_PORT) == 200
     add("piper_up", "Natural voice server (8766)", up and bool(kv) if kokoro_files_ok() else up,
@@ -783,6 +783,9 @@ def fix_all() -> None:
         if kokoro_py() is None:
             _step("Installing Kokoro (voice engine)")
             _pip(["kokoro-onnx"])
+        for _p in KOKORO_DIR.glob("*.part"):
+            if time.time() - _p.stat().st_mtime > 86400:
+                _p.unlink(missing_ok=True)
         for name, (ksize, ksha) in KOKORO_PIN.items():
             dest = KOKORO_DIR / name
             if dest.is_file() and dest.stat().st_size == ksize:
@@ -790,8 +793,10 @@ def fix_all() -> None:
             _step(f"Downloading {name} ({ksize // 1_000_000} MB)")
             try:
                 _fetch_verified(KOKORO_BASE + name, dest, ksize, ksha)
+                _KOKORO_ERR["msg"] = ""
             except Exception as e:
                 _step(f"Kokoro download failed: {e}")
+                _KOKORO_ERR["msg"] = str(e)[:160]
                 break
         write_tts_server()
         # 4. start everything and check it

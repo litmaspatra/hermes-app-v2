@@ -105,7 +105,7 @@ export function DoctorPanel() {
             setTimeout(doctorRefresh, 800)
           }}
         >
-          {running ? 'Fixing…' : bad.some(c => c.fix) ? 'Fix everything' : 'Nothing to fix'}
+          {running ? 'Fixing…' : bad.some(c => c.fix) ? (bad.some(c => c.id === 'kokoro_files') ? 'Fix everything (downloads about 120 MB)' : 'Fix everything') : 'Nothing to fix'}
         </button>
         <button className="btn" onClick={() => { haptic(); doctorRefresh() }}>Check again</button>
       </div>

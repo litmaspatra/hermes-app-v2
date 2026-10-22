@@ -487,6 +487,25 @@ def router_up() -> bool:
         return False
 
 
+def memory_provider() -> str:
+    """memory.provider from ~/.hermes/config.yaml, '' if unset. Plain scan, no YAML dependency."""
+    import re
+    try:
+        inside = False
+        for line in (HOME / ".hermes" / "config.yaml").read_text().splitlines():
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            if not line[0].isspace():
+                inside = line.split("#")[0].strip() == "memory:"
+                continue
+            m = re.match(r"\s+provider:\s*['\"]?([\w.-]+)", line) if inside else None
+            if m:
+                return m.group(1)
+    except Exception:
+        pass
+    return ""
+
+
 def hindsight_config() -> dict:
     try:
         return json.loads((HOME / ".hermes" / "hindsight-lite" / "config.json").read_text())
@@ -691,15 +710,21 @@ def diagnose() -> dict:
     need = []
     cfg = hindsight_config()
     hp = hermes_py()
-    add("hindsight", "Hindsight Lite present", hp is not None and cached("hindsight", lambda: py_ok(hp, "import hindsight_lite")), "Hindsight Lite is not importable in Hermes' Python.", fix=False)
-    add("memory_write", "Hermes can save new memories on its own", bool(cfg.get("llm_model")),
-        "hindsight-lite/config.json has no llm_model, so automatic retention is OFF: only an explicit hmem_remember saves. Set llm_base_url + llm_model (any small chat model).", fix=False)
-    hl, hu = cfg.get("llm_base_url", ""), hermes_llm_url()
-    env_name = cfg.get("llm_api_key_env", "")
-    add("llm_endpoint", "One LLM endpoint for Hermes and memory", bool(hu) and _norm_url(hl) == _norm_url(hu),
-        f"Hermes uses {hu or '(not set)'} but hindsight-lite/config.json llm_base_url is {hl or '(not set)'}. Make them the same.", fix=False)
-    add("llm_key", "LLM key is set for Hermes", bool(env_name) and key_present(env_name),
-        "llm_api_key_env is not set in hindsight-lite/config.json." if not env_name else f"{env_name} has no value in ~/.hermes/.env.", fix=False)
+    prov = memory_provider()
+    add("memory_provider", f"Memory provider: {prov or 'not set'}", bool(prov),
+        "Hermes config.yaml has no memory.provider, so only the built-in file memory is used.", fix=False)
+    if prov == "mnemosyne":
+        add("mnemosyne", "Mnemosyne present", hp is not None and cached("mnemosyne", lambda: py_ok(hp, "import mnemosyne")), "Mnemosyne is not importable in Hermes' Python.", fix=False)
+    elif prov == "hindsight-lite":
+        add("hindsight", "Hindsight Lite present", hp is not None and cached("hindsight", lambda: py_ok(hp, "import hindsight_lite")), "Hindsight Lite is not importable in Hermes' Python.", fix=False)
+        add("memory_write", "Hermes can save new memories on its own", bool(cfg.get("llm_model")),
+            "hindsight-lite/config.json has no llm_model, so automatic retention is OFF: only an explicit hmem_remember saves. Set llm_base_url + llm_model (any small chat model).", fix=False)
+        hl, hu = cfg.get("llm_base_url", ""), hermes_llm_url()
+        env_name = cfg.get("llm_api_key_env", "")
+        add("llm_endpoint", "One LLM endpoint for Hermes and memory", bool(hu) and _norm_url(hl) == _norm_url(hu),
+            f"Hermes uses {hu or '(not set)'} but hindsight-lite/config.json llm_base_url is {hl or '(not set)'}. Make them the same.", fix=False)
+        add("llm_key", "LLM key is set for Hermes", bool(env_name) and key_present(env_name),
+            "llm_api_key_env is not set in hindsight-lite/config.json." if not env_name else f"{env_name} has no value in ~/.hermes/.env.", fix=False)
     fb = router_health()
     add("fastbrain_api", "FastBrain reports its version", bool(fb.get("version")), "FastBrain is down, or too old to report a version. Update it if the router check above is green.", fix=False)
     n = len(read_aliases())

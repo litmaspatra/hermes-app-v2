@@ -206,12 +206,50 @@ interface MemSnapshot {
 }
 type MemData = { memory: MemSnapshot; user: MemSnapshot }
 
+type RecallHit = { memory_id: string; content: string }
+type RecallRes = { provider: string; supported: boolean; results: RecallHit[] }
+
+function RecallSheet({ onClose }: { onClose: () => void }) {
+  const [q, setQ] = useState('')
+  const [res, setRes] = useState<RecallRes | null>(null)
+  const [busy, setBusy] = useState(false)
+  const go = async () => {
+    if (!q.trim()) return
+    setBusy(true)
+    try {
+      setRes(await api<RecallRes>('GET', `/api/plugins/hermes-mobile/memory/recall?q=${encodeURIComponent(q.trim())}`))
+    } catch (e) {
+      toast(errText(e), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Sheet title="Search memory" onClose={onClose}>
+      <input className="sheet-input" autoFocus value={q} placeholder="What do you want to recall?" onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Enter' && void go()} />
+      <div className="sheet-actions">
+        <button className="btn primary" disabled={busy || !q.trim()} onClick={() => void go()}>
+          Search
+        </button>
+      </div>
+      {res && !res.supported && <div className="dim small">Search isn’t available for “{res.provider || 'this provider'}” yet.</div>}
+      {res?.supported && !res.results.length && <div className="dim small">Nothing found</div>}
+      {res?.results.map(h => (
+        <div key={h.memory_id} className="mem-entry">
+          {h.content}
+        </div>
+      ))}
+    </Sheet>
+  )
+}
+
 export function MemoryScreen() {
   const profile = useStore(s => s.profile)
   const { data, error, loading, setData } = useLoader(() => api<MemData>('GET', '/api/plugins/hermes-mobile/memory'), [profile])
   const [tab, setTab] = useState<'memory' | 'user'>('memory')
   const [edit, setEdit] = useState<{ old: string | null; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
+  const [search, setSearch] = useState(false)
   const snap = data?.[tab]
 
   const run = async (action: 'add' | 'replace' | 'remove', content?: string, old?: string) => {
@@ -243,9 +281,14 @@ export function MemoryScreen() {
     <ScreenShell
       title="Memory"
       actions={
-        <button className="icon-btn" aria-label="Add" onClick={() => setEdit({ old: null, text: '' })}>
-          ＋
-        </button>
+        <>
+          <button className="icon-btn" aria-label="Search" onClick={() => setSearch(true)}>
+            🔍
+          </button>
+          <button className="icon-btn" aria-label="Add" onClick={() => setEdit({ old: null, text: '' })}>
+            ＋
+          </button>
+        </>
       }
     >
       <div className="segmented">
@@ -303,6 +346,7 @@ export function MemoryScreen() {
           </div>
         </Sheet>
       )}
+      {search && <RecallSheet onClose={() => setSearch(false)} />}
     </ScreenShell>
   )
 }

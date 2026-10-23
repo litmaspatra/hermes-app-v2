@@ -140,6 +140,10 @@ public class HermesService extends Service {
         key = ensureKey();
         startForeground(STATUS_ID, statusNotification("Ready", null, false), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
         running = true;
+        synchronized (this) {
+            answeredIds.addAll(ApprovalLedger.closedIds(this)); // approvals closed before a restart stay closed
+            while (answeredIds.size() > 100) answeredIds.remove(answeredIds.iterator().next());
+        }
         main.postDelayed(bridgeWatch, 20_000);
         instance = this;
         new Thread(this::serve, "hermes-events").start();
@@ -800,7 +804,10 @@ public class HermesService extends Service {
             // The plugin's "answered" event normally ends an approval. If it never comes, drop it long after its time.
             for (int k = approvals.size() - 1; k >= 0; k--) {
                 JSONObject a = approvals.get(k);
-                if (now > deadlineOf(a) + APPROVAL_STALE_MS) removeApproval(a, false);
+                if (now > deadlineOf(a) + APPROVAL_STALE_MS) {
+                    markClosed(a.optString("request_id", ""), "expired");
+                    removeApproval(a, false);
+                }
             }
             if (approvals.isEmpty()) {
                 tickScheduled = false;
@@ -937,6 +944,7 @@ public class HermesService extends Service {
                             ap.put("_answered", true);
                         } catch (Exception ignored) {
                         }
+                        markClosed(ap.optString("request_id", ""), "answered");
                         if (approvals.remove(ap) || removeMatching(ap)) {
                             // the plugin reports this answer too: that report must not remove another approval
                             ignoreClear.add(session + "|" + (System.currentTimeMillis() + 20_000));
@@ -1054,14 +1062,19 @@ public class HermesService extends Service {
     /** request ids answered in the app's own sheet: a late or repeated event for them must never ask again. */
     private final java.util.LinkedHashSet<String> answeredIds = new java.util.LinkedHashSet<>();
 
+    /** A closed approval is remembered in memory and in the ledger file. state: answered | expired. */
+    private synchronized void markClosed(String rid, String state) {
+        if (rid == null || rid.isEmpty()) return;
+        answeredIds.add(rid);
+        while (answeredIds.size() > 100) answeredIds.remove(answeredIds.iterator().next());
+        ApprovalLedger.close(this, rid, state);
+    }
+
     /** The app's sheet answered this approval: forget it everywhere (list, notification, island) right now. */
     void approvalAnsweredInApp(String requestId, String session, String command, String description) {
         main.post(() -> {
             synchronized (HermesService.this) {
-                if (requestId != null && !requestId.isEmpty()) {
-                    answeredIds.add(requestId);
-                    while (answeredIds.size() > 100) answeredIds.remove(answeredIds.iterator().next());
-                }
+                markClosed(requestId, "answered");
                 // The page's session ids are not the plugin's ("session" and "key" differ), and the request id may be absent
                 // from the page's copy: so match by id when both have one, else by what is being asked (the command),
                 // else by chat. Wrong matches are worse than none, so the command must be non-empty and identical.
@@ -1181,8 +1194,7 @@ public class HermesService extends Service {
     /** The plugin says THIS request is closed (answered anywhere, or timed out). Remembered, so an approval event that
      *  arrives after its own "closed" (the two travel separately) is dropped too. */
     synchronized void clearApprovalById(String rid) {
-        answeredIds.add(rid);
-        while (answeredIds.size() > 100) answeredIds.remove(answeredIds.iterator().next());
+        markClosed(rid, "answered");
         for (JSONObject a : approvals) {
             if (rid.equals(a.optString("request_id", ""))) {
                 removeApproval(a, true);
@@ -1226,6 +1238,7 @@ public class HermesService extends Service {
         nm.cancel(t, 2);
         long total = Math.max(1, a.optLong("timeout", 300)) * 1000L;
         boolean timedOut = fromClear && !a.optBoolean("_answered", false) && System.currentTimeMillis() - a.optLong("_at", 0) >= total - 3000;
+        if (timedOut) markClosed(a.optString("request_id", ""), "expired");
         if (timedOut) {
             String what = a.optString("what", "");
             String cmd = a.optString("command", "");

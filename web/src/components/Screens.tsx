@@ -1101,7 +1101,7 @@ export function HubScreen() {
             <span className="chev" aria-hidden="true">›</span>
           </button>
         ))}
-        <div className="hub-foot mono">
+        <div className="hub-foot keep mono">
           <span className={conn === 'open' ? 'ok' : ''}>●</span> {conn === 'open' ? 'Connected' : conn} · profile: {profile}
           {startupText() ? ` · ${startupText()}` : ''}
         </div>

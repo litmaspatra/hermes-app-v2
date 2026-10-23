@@ -76,11 +76,15 @@ function Header() {
   const canvasDocs = useCanvas(c => c.docs.length)
   const canvasWriting = useCanvas(c => Boolean(c.writing))
   const unread = useStore(s => s.unread.length > 0)
+  const model = useStore(s => s.active?.info.model ?? s.defaultModel)
   return (
     <header className="topbar">
       <button className="icon-btn menu-btn" aria-label={unread ? 'Sessions (unread chats)' : 'Sessions'} onClick={() => setState({ drawer: true })}>
         ☰{unread && <span className="unread-dot on-menu" />}
       </button>
+      <span className="relay-avatar" aria-hidden="true">
+        ⬡<span className={`relay-dot ${dot}`} />
+      </span>
       <button className="title-btn" onClick={() => hasActive && setState({ sheet: 'chat-menu' })}>
         <span className="title">
           <Title text={title} fallback={hasActive ? 'New chat' : 'Hermes'} />
@@ -96,7 +100,7 @@ function Header() {
             }}
           />
           {reading ? <span className="reading-badge" title="Reading replies aloud">🔊</span> : null}
-          {profile !== 'default' ? profile : 'Hermes Agent'}
+          {model ? model.replace(/^.*\//, '') : profile !== 'default' ? profile : 'Hermes Agent'}
         </span>
       </button>
       {(
@@ -124,6 +128,42 @@ function Header() {
         ⋮
       </button>
     </header>
+  )
+}
+
+/** Context-window use of the open chat (Relay-style bar under the header). */
+function CtxBar() {
+  const ctx = useStore(s => s.active?.ctx ?? null)
+  if (!ctx || !ctx.max) return null
+  const pct = Math.min(100, Math.round(ctx.percent ?? (ctx.used / ctx.max) * 100))
+  const k = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n))
+  return (
+    <div className="ctx-bar" aria-label={`Context ${pct}% used`}>
+      <div className="track">
+        <span className={pct > 90 ? 'full' : pct > 70 ? 'hot' : ''} style={{ width: `${Math.max(2, pct)}%` }} />
+      </div>
+      <span>
+        {pct}% · {k(ctx.used)}/{k(ctx.max)}
+      </span>
+    </div>
+  )
+}
+
+/** One-line state under the composer: connection, profile and model. */
+function StatusPill() {
+  const conn = useStore(s => s.conn)
+  const dot = useStore(s => dotState(s.conn, s.health))
+  const profile = useStore(s => s.profile)
+  const model = useStore(s => s.active?.info.model ?? s.defaultModel)
+  const label = conn === 'open' ? (dot === 'ok' ? 'Connected' : 'Connected (check)') : conn === 'connecting' || conn === 'idle' ? 'Connecting…' : 'Offline'
+  return (
+    <div className="relay-pill" role="status">
+      <span className={dot === 'ok' ? 'ok' : dot === 'warn' ? 'warn' : dot === 'err' ? 'err' : ''}>⚡ {label}</span>
+      <span className="sep">·</span>
+      <span className="rest">
+        {model ? `${model.replace(/^.*\//, '')} / ` : ''}profile: {profile}
+      </span>
+    </div>
   )
 }
 
@@ -625,6 +665,7 @@ export function App() {
   return (
     <div className="app">
       <Header />
+      <CtxBar />
       <ConnBanner />
       <FindBar />
       <Chat onPick={t => setInjected(t)} />
@@ -633,6 +674,7 @@ export function App() {
       <CompressHint />
       <TtsPlayer />
       <Composer injected={injected} onInjected={clearInjected} />
+      <StatusPill />
       {screen === 'skills' && <SkillsScreen onUse={t => setInjected(t)} />}
       {screen === 'memory' && <MemoryScreen />}
       {screen === 'cron' && <CronScreen />}

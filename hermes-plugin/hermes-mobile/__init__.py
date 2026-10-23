@@ -411,6 +411,35 @@ def _on_subagent_start(child_session_id=None, parent_session_id=None, child_goal
         _set_status(parent_session_id, f"Sub-agent: {_short(child_goal, 60)}", "Agents")
 
 
+def _approval_context(session_id: str) -> dict:
+    """What the app shows under an approval: the chat's title, the user's last message, and the working folder."""
+    out = {"chat": _chat_title(session_id), "asked": "", "cwd": ""}
+    try:
+        import sqlite3
+
+        home = os.environ.get("HERMES_HOME") or os.path.join(os.path.expanduser("~"), ".hermes")
+        db = sqlite3.connect(f"file:{os.path.join(home, 'state.db')}?mode=ro", uri=True, timeout=1.5)
+        try:
+            row = db.execute("SELECT content FROM messages WHERE session_id = ? AND role = 'user' ORDER BY id DESC LIMIT 1",
+                             (session_id,)).fetchone()
+            out["asked"] = _short(row[0], 140) if row else ""
+            cols = [r[1] for r in db.execute("PRAGMA table_info(sessions)")]
+            col = next((c for c in ("cwd", "working_dir", "workdir", "directory") if c in cols), "")
+            if col:
+                r2 = db.execute(f"SELECT {col} FROM sessions WHERE id = ?", (session_id,)).fetchone()
+                out["cwd"] = str((r2[0] if r2 else "") or "")
+        finally:
+            db.close()
+    except Exception:
+        pass
+    if not out["cwd"]:
+        try:
+            out["cwd"] = os.getcwd()  # the local terminal backend runs in Hermes' own folder
+        except Exception:
+            pass
+    return out
+
+
 def _on_pre_approval_request(command=None, description=None, session_key=None, session_id=None, **kw):
     sid = session_id or session_key or ""
     _set_status(sid, "Waiting for your approval", "Approve?")
@@ -434,7 +463,7 @@ def _on_pre_approval_request(command=None, description=None, session_key=None, s
             _announced[rid] = (sid, session_key or "")  # so the answer can say WHICH request it closes
     _send("approval", "Approval needed", body, sid, urgent=True, key=session_key or "", timeout=timeout,
           what=description or "", command=command or "", request_id=rid,
-          allow_session=kw.get("allow_session") is not False)
+          allow_session=kw.get("allow_session") is not False, **_approval_context(sid))
 
 
 def _approval_request_id(session_key, command, given=None) -> str:

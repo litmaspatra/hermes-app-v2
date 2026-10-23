@@ -140,10 +140,7 @@ public class HermesService extends Service {
         key = ensureKey();
         startForeground(STATUS_ID, statusNotification("Ready", null, false), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
         running = true;
-        synchronized (this) {
-            answeredIds.addAll(ApprovalLedger.closedIds(this)); // approvals closed before a restart stay closed
-            while (answeredIds.size() > 100) answeredIds.remove(answeredIds.iterator().next());
-        }
+        tracker.load(ApprovalLedger.closedIds(this)); // approvals closed before a restart stay closed
         main.postDelayed(bridgeWatch, 20_000);
         instance = this;
         new Thread(this::serve, "hermes-events").start();
@@ -449,7 +446,10 @@ public class HermesService extends Service {
                 double ts = e.optDouble("ts", 0);
                 if (ts > 1e9 && Math.abs(ts * 1000 - now) < 10 * 60_000L) asked = (long) (ts * 1000);
                 long deadline = asked + Math.max(1, e.optLong("timeout", 300)) * 1000L;
-                if (deadline < now) return;
+                if (ApprovalTracker.pastDeadline(deadline, now)) {
+                    markClosed(e.optString("request_id", ""), "expired"); // a replay of it must not ask either
+                    return;
+                }
                 try {
                     e.put("_deadline", deadline);
                     e.put("_at", asked);
@@ -804,7 +804,7 @@ public class HermesService extends Service {
             // The plugin's "answered" event normally ends an approval. If it never comes, drop it long after its time.
             for (int k = approvals.size() - 1; k >= 0; k--) {
                 JSONObject a = approvals.get(k);
-                if (now > deadlineOf(a) + APPROVAL_STALE_MS) {
+                if (ApprovalTracker.stale(now, deadlineOf(a), APPROVAL_STALE_MS)) {
                     markClosed(a.optString("request_id", ""), "expired");
                     removeApproval(a, false);
                 }
@@ -1060,13 +1060,11 @@ public class HermesService extends Service {
     }
 
     /** request ids answered in the app's own sheet: a late or repeated event for them must never ask again. */
-    private final java.util.LinkedHashSet<String> answeredIds = new java.util.LinkedHashSet<>();
+    private final ApprovalTracker tracker = new ApprovalTracker();
 
     /** A closed approval is remembered in memory and in the ledger file. state: answered | expired. */
     private synchronized void markClosed(String rid, String state) {
-        if (rid == null || rid.isEmpty()) return;
-        answeredIds.add(rid);
-        while (answeredIds.size() > 100) answeredIds.remove(answeredIds.iterator().next());
+        if (!tracker.close(rid)) return;
         ApprovalLedger.close(this, rid, state);
     }
 
@@ -1080,17 +1078,8 @@ public class HermesService extends Service {
                 // else by chat. Wrong matches are worse than none, so the command must be non-empty and identical.
                 JSONObject hit = null;
                 for (JSONObject o : approvals) {
-                    String rid = o.optString("request_id", "");
-                    if (requestId != null && !requestId.isEmpty() && !rid.isEmpty()) {
-                        if (requestId.equals(rid)) {
-                            hit = o;
-                            break;
-                        }
-                        continue;
-                    }
-                    String cmd = o.optString("command", "").trim();
-                    if (!command.trim().isEmpty() && command.trim().equals(cmd)
-                            && (description.trim().isEmpty() || o.optString("what", "").trim().isEmpty() || description.trim().equals(o.optString("what", "").trim()))) {
+                    if (ApprovalTracker.answerMatches(requestId, command, description, o.optString("request_id", ""),
+                            o.optString("command", ""), o.optString("what", ""))) {
                         hit = o;
                         break;
                     }
@@ -1123,7 +1112,7 @@ public class HermesService extends Service {
 
     /** Adds an approval to the waiting list and makes sure something is asking for it. */
     synchronized void queueApproval(JSONObject e) {
-        if (answeredIds.contains(e.optString("request_id", "x"))) return; // already answered in the app
+        if (tracker.isClosed(e.optString("request_id", ""))) return; // already answered or expired
         // The same request sent again (plugin retry): refresh it instead of stacking a copy.
         for (int k = approvals.size() - 1; k >= 0; k--) {
             JSONObject o = approvals.get(k);
@@ -1160,13 +1149,8 @@ public class HermesService extends Service {
     }
 
     static boolean sameApproval(JSONObject a, JSONObject b) {
-        String ra = a.optString("request_id", ""), rb = b.optString("request_id", "");
-        boolean sameSession = a.optString("session", "").equals(b.optString("session", ""));
-        // Both have an id: the id decides.
-        if (!ra.isEmpty() && !rb.isEmpty()) return ra.equals(rb) && sameSession;
-        // One or both lack an id (the plugin's first announcement comes before Hermes registers the request):
-        // same session and same command is the same approval, not a second one.
-        return sameSession && a.optString("command", "").equals(b.optString("command", ""));
+        return ApprovalTracker.same(a.optString("request_id", ""), a.optString("session", ""), a.optString("command", ""),
+                b.optString("request_id", ""), b.optString("session", ""), b.optString("command", ""));
     }
 
     static String approvalTag(JSONObject a) {
@@ -1178,6 +1162,8 @@ public class HermesService extends Service {
         String session = e.optString("session", null);
         NotificationManager nm = getSystemService(NotificationManager.class);
         String body = e.optString("body", "");
+        String meta = ApprovalInfo.meta(e.optString("chat", ""), e.optString("cwd", ""), e.optString("asked", ""), -1);
+        if (!meta.isEmpty()) body = body + "\n" + meta;
         String risk = ApprovalPolicy.risk(e.optString("command", ""));
         String title = (risk != null ? "⚠ " + risk + " · " : "") + e.optString("title", "Hermes");
         Notification.Builder b = alertBuilder(CH_ALERT, title, again ? "Still waiting for your answer: " + body : body, session, true)

@@ -100,7 +100,7 @@ final class IslandOverlay {
     private PetView pet;
     private TextView title, sub;
     private LinearLayout approvalBox, dropBox, buttons;
-    private TextView apWhat, apCmd;
+    private TextView apWhat, apCmd, apMeta;
     private ImageView thumb;
     private TextView dropInfo;
     private EditText input;
@@ -325,6 +325,10 @@ final class IslandOverlay {
         apCmd.setEllipsize(android.text.TextUtils.TruncateAt.END);
         approvalBox.addView(apWhat);
         approvalBox.addView(apCmd);
+        apMeta = label("", 10, Color.parseColor("#B0B0B0"), false);
+        apMeta.setMaxLines(4);
+        apMeta.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        approvalBox.addView(apMeta);
         LinearLayout row = new LinearLayout(ui);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setPadding(0, dp(8), 0, dp(2));
@@ -484,6 +488,11 @@ final class IslandOverlay {
             apWhat.setVisibility(what.isEmpty() ? View.GONE : View.VISIBLE);
             apCmd.setText(cmd.isEmpty() ? "" : "$ " + cmd);
             apCmd.setVisibility(cmd.isEmpty() ? View.GONE : View.VISIBLE);
+            long at = state.approval.optLong("_at", 0);
+            String meta = ApprovalInfo.meta(state.approval.optString("chat", ""), state.approval.optString("cwd", ""),
+                    state.approval.optString("asked", ""), at > 0 ? Math.max(0, System.currentTimeMillis() - at) / 1000 : -1);
+            apMeta.setText(meta);
+            apMeta.setVisibility(meta.isEmpty() ? View.GONE : View.VISIBLE);
             buttons.getChildAt(1).setVisibility(state.approval.optBoolean("allow_session", true) ? View.VISIBLE : View.GONE);
         }
         dropBox.setVisibility(panelOpen && !dragging && !listening ? View.VISIBLE : View.GONE);

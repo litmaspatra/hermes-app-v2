@@ -462,7 +462,7 @@ async function main() {
   // ── #21 Files: Back goes up one folder, then leaves ──
   await page.getByRole('button', { name: /^Sessions/ }).click()
   await page.locator('.nav-tile', { hasText: 'Hermes' }).click()
-  await page.locator('.hub-card', { hasText: 'Files' }).click()
+  await page.locator('.hub-card', { has: page.locator('.hub-title', { hasText: /^Files$/ }) }).click()
   const crumbText = () => page.locator('.crumbs').textContent()
   await page.locator('.file-row', { hasText: /^📁a/ }).click()
   await page.locator('.crumbs', { hasText: 'sdcard/a/' }).waitFor({ timeout: 5000 })
@@ -477,7 +477,7 @@ async function main() {
   await page.evaluate(() => window.hermesBack())
   await sleep(300)
   check((await page.locator('.crumbs').count()) === 0, 'at the root chip Back leaves Files')
-  check((await page.locator('.hub-card').count()) === 5, '…back to the Hermes hub that opened it')
+  check((await page.locator('.hub-card').count()) === 6, '…back to the Hermes hub that opened it')
   await page.evaluate(() => window.hermesBack())
   await sleep(200)
   check((await page.locator('.hub-card').count()) === 0, 'Back again closes the hub')
@@ -577,7 +577,7 @@ async function main() {
   await page.locator('.hub-card', { hasText: 'Memory' }).click()
   await page.locator('.screen .title', { hasText: 'Memory' }).waitFor({ timeout: 3000 })
   await page.getByRole('button', { name: 'Back' }).last().click()
-  check((await page.locator('.hub-card').count()) === 5, 'Back from a page returns to the hub')
+  check((await page.locator('.hub-card').count()) === 6, 'Back from a page returns to the hub')
   await page.evaluate(() => window.hermesBack())
 
   // ── setup check (browser: only the Hermes checks) ──

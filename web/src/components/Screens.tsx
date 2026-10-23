@@ -7,6 +7,7 @@ import { api, ApiError, qs } from '../api'
 import { errText, newSession, resumeSession, rpc } from '../gateway'
 import { closeScreen, setState, toast, useStore, type Screen } from '../store'
 import { haptic, openFile } from '../bridge'
+import { startupText } from '../startup'
 import { Markdown } from './Markdown'
 
 // ── shared building blocks ──────────────────────────────────
@@ -40,6 +41,20 @@ export function Sheet({ title, onClose, children }: { title: string; onClose: ()
         <div className="sheet-title">{title}</div>
         {children}
       </div>
+    </div>
+  )
+}
+
+/** A row of small stat tiles above a screen's list (same look as the Hermes hub). */
+export function StatRow({ items }: { items: [string | number, string, boolean?][] }) {
+  return (
+    <div className="hub-stats stat-row">
+      {items.map(([v, label, ok]) => (
+        <div className="hub-stat" key={label}>
+          <b className={ok ? 'ok' : ''}>{v}</b>
+          <span>{label}</span>
+        </div>
+      ))}
     </div>
   )
 }
@@ -144,6 +159,7 @@ export function SkillsScreen({ onUse }: { onUse: (text: string) => void }) {
   const on = (data || []).filter(s => s.enabled).length
   return (
     <ScreenShell title={`Skills ${total ? `· ${on}/${total} on` : ''}`}>
+      {data && <StatRow items={[[on, 'enabled', true], [total, 'installed'], [new Set(data.map(s => s.category || 'general')).size, 'categories']]} />}
       <div className="screen-tools">
         <input className="search" placeholder="Search skills…" value={q} onChange={e => setQ(e.target.value)} />
         <button className={`pill${onlyOn ? ' on' : ''}`} onClick={() => setOnlyOn(v => !v)}>
@@ -291,6 +307,15 @@ export function MemoryScreen() {
         </>
       }
     >
+      {data && (
+        <StatRow
+          items={[
+            [`${data.memory.limit ? Math.round((data.memory.used / data.memory.limit) * 100) : 0}%`, 'memory full'],
+            [data.memory.entries.length, 'notes'],
+            [data.user.entries.length, 'about you']
+          ]}
+        />
+      )}
       <div className="segmented">
         <button className={tab === 'memory' ? 'on' : ''} onClick={() => setTab('memory')}>
           Memory
@@ -477,6 +502,15 @@ export function CronScreen() {
         </button>
       }
     >
+      {data && (
+        <StatRow
+          items={[
+            [data.filter(j => !jobPaused(j)).length, 'active', true],
+            [data.filter(j => jobPaused(j)).length, 'paused'],
+            [data.length, 'total']
+          ]}
+        />
+      )}
       <Status loading={loading} error={error} empty={!data?.length} emptyText="No scheduled jobs on this phone yet. Tap ＋ to create one." />
       {(data || []).map(j => (
         <div key={jobId(j)} className={`card${jobPaused(j) ? ' muted' : ''}`}>
@@ -955,11 +989,13 @@ const HUB: { key: Exclude<Screen, null>; icon: string; title: string; tone: stri
   { key: 'memory', icon: '🧠', title: 'Memory', tone: 'purple' },
   { key: 'cron', icon: '⏱', title: 'Scheduled jobs', tone: 'blue' },
   { key: 'files', icon: '📁', title: 'Files', tone: 'teal' },
-  { key: 'projects', icon: '🗂', title: 'Projects', tone: 'green' }
+  { key: 'projects', icon: '🗂', title: 'Projects', tone: 'green' },
+  { key: 'bots', icon: '👤', title: 'Profiles', tone: 'blue' }
 ]
 
 interface HubData {
   skills?: string
+  skillsOn?: number
   memory?: string
   memPct?: number
   cron?: string
@@ -971,7 +1007,7 @@ const HUB_LOADERS: (() => Promise<Partial<HubData>>)[] = [
   async () => {
     const skills = await api<SkillRow[]>('GET', '/api/skills')
     const on = skills.filter(s => s.enabled !== false).length
-    return { skills: `${on} enabled${on < skills.length ? ` of ${skills.length}` : ''}` }
+    return { skillsOn: on, skills: `${on} enabled${on < skills.length ? ` of ${skills.length}` : ''}` }
   },
   async () => {
     const mem = await api<MemData>('GET', '/api/plugins/hermes-mobile/memory')
@@ -1020,12 +1056,29 @@ export function HubScreen() {
   }, [profile])
   const sub = (k: string): string => {
     if (k === 'files') return 'Browse, open and upload on the phone'
+    if (k === 'bots') return 'SOUL.md, models, personalities'
     const v = data[k as keyof HubData]
     return typeof v === 'string' ? v : failed.has(['skills', 'memory', 'cron', 'projects'].indexOf(k)) ? 'Couldn’t load' : 'Loading…'
   }
+  const conn = useStore(s => s.conn)
   return (
     <ScreenShell title="Hermes">
       <div className="hub">
+        {/* Stat tiles and status line: layout idea from Hermes Relay's Manage screen (MIT, Axiom Labs). */}
+        <div className="hub-stats">
+          <div className="hub-stat">
+            <b>{data.skillsOn ?? '–'}</b>
+            <span>skills on</span>
+          </div>
+          <div className="hub-stat">
+            <b>{data.memPct != null ? `${data.memPct}%` : '–'}</b>
+            <span>memory used</span>
+          </div>
+          <div className="hub-stat">
+            <b className={conn === 'open' ? 'ok' : ''}>{conn === 'open' ? 'ready' : conn}</b>
+            <span>Hermes</span>
+          </div>
+        </div>
         {HUB.map(h => (
           <button
             key={h.key}
@@ -1048,6 +1101,10 @@ export function HubScreen() {
             <span className="chev" aria-hidden="true">›</span>
           </button>
         ))}
+        <div className="hub-foot mono">
+          <span className={conn === 'open' ? 'ok' : ''}>●</span> {conn === 'open' ? 'Connected' : conn} · profile: {profile}
+          {startupText() ? ` · ${startupText()}` : ''}
+        </div>
       </div>
     </ScreenShell>
   )

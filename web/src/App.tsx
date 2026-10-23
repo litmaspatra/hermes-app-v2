@@ -28,6 +28,8 @@ import { autoDoctor } from './components/Doctor'
 import { autoPet } from './pets'
 import { WelcomeScreen, checkFirstRun } from './components/Connect'
 import { BotsScreen } from './components/Bots'
+import { markStartup } from './startup'
+import { ProfileInspectorScreen } from './components/ProfileInspector'
 import { CronScreen, FilesScreen, HubScreen, MemoryScreen, ProjectsScreen, SkillsScreen } from './components/Screens'
 import { Spinner } from './components/Spinner'
 
@@ -590,6 +592,11 @@ export function App() {
     void connect()
   }, [])
   useEffect(() => installSwipeToDrawer(), [])
+  useEffect(() => markStartup('render'), [])
+  const sessionCount = useStore(s => s.sessions.length)
+  useEffect(() => {
+    if (sessionCount > 0) markStartup('list')
+  }, [sessionCount])
 
   const conn = useStore(s => s.conn)
   useEffect(() => {
@@ -632,6 +639,7 @@ export function App() {
       {screen === 'files' && <FilesScreen onUse={t => setInjected(t)} />}
       {screen === 'projects' && <ProjectsScreen />}
       {screen === 'bots' && <BotsScreen />}
+      {screen === 'inspect' && <ProfileInspectorScreen />}
       {screen === 'settings' && <SettingsScreen key={screenKey} />}
       {screen === 'setup' && <SetupScreen />}
       {screen === 'welcome' && <WelcomeScreen />}

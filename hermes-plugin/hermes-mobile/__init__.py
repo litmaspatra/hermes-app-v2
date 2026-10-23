@@ -424,6 +424,11 @@ def _on_pre_approval_request(command=None, description=None, session_key=None, s
     except Exception:
         timeout = 60
     rid = _approval_request_id(session_key, command, kw.get("request_id"))
+    if not rid:
+        # Hermes fires this hook before it has registered the request, so there is no id yet. /approve refuses
+        # answers without an id, so a card for it could never be answered. The hook fires again with the id.
+        _dbg("approval-hook no id yet, not sent")
+        return
     if rid:
         with _lock:
             _announced[rid] = (sid, session_key or "")  # so the answer can say WHICH request it closes

@@ -1112,7 +1112,13 @@ public class HermesService extends Service {
     synchronized void queueApproval(JSONObject e) {
         if (answeredIds.contains(e.optString("request_id", "x"))) return; // already answered in the app
         // The same request sent again (plugin retry): refresh it instead of stacking a copy.
-        for (int k = approvals.size() - 1; k >= 0; k--) if (sameApproval(approvals.get(k), e)) approvals.remove(k);
+        for (int k = approvals.size() - 1; k >= 0; k--) {
+            JSONObject o = approvals.get(k);
+            if (!sameApproval(o, e)) continue;
+            // A late copy without an id must not replace the one that has it: that id is what the answer needs.
+            if (e.optString("request_id", "").isEmpty() && !o.optString("request_id", "").isEmpty()) return;
+            approvals.remove(k);
+        }
         approvals.add(e);
         // Always remembered, even while the app is open: the in-app sheet can be lost (the page's socket drops in
         // the background) and then nothing else would still be asking. Only the popup waits.
@@ -1142,8 +1148,12 @@ public class HermesService extends Service {
 
     static boolean sameApproval(JSONObject a, JSONObject b) {
         String ra = a.optString("request_id", ""), rb = b.optString("request_id", "");
-        if (!ra.isEmpty() || !rb.isEmpty()) return ra.equals(rb) && a.optString("session", "").equals(b.optString("session", ""));
-        return a.optString("session", "").equals(b.optString("session", "")) && a.optString("command", "").equals(b.optString("command", ""));
+        boolean sameSession = a.optString("session", "").equals(b.optString("session", ""));
+        // Both have an id: the id decides.
+        if (!ra.isEmpty() && !rb.isEmpty()) return ra.equals(rb) && sameSession;
+        // One or both lack an id (the plugin's first announcement comes before Hermes registers the request):
+        // same session and same command is the same approval, not a second one.
+        return sameSession && a.optString("command", "").equals(b.optString("command", ""));
     }
 
     static String approvalTag(JSONObject a) {

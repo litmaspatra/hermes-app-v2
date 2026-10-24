@@ -119,7 +119,15 @@ def kokoro():
     global _k
     if _k is None:
         from kokoro_onnx import Kokoro
-        _k = Kokoro(str(MODEL), str(VOICES))
+        try:  # an explicit thread count: measured ~12% faster than the default on this phone (6 and 8 threads are slower)
+            import onnxruntime as ort
+            so = ort.SessionOptions()
+            so.intra_op_num_threads = int(os.environ.get("HM_TTS_THREADS", "4"))
+            sess = ort.InferenceSession(str(MODEL), sess_options=so, providers=["CPUExecutionProvider"])
+            _k = Kokoro.from_session(sess, str(VOICES))
+        except Exception as e:  # older kokoro-onnx without from_session, or anything unexpected: the default way
+            print("kokoro: default session:", type(e).__name__, e, flush=True)
+            _k = Kokoro(str(MODEL), str(VOICES))
     return _k
 
 
@@ -253,11 +261,18 @@ def main() -> int:
     srv = ThreadingHTTPServer(("127.0.0.1", a.port), make_handler(Path(a.key_file)))
     srv.daemon_threads = True
     if kokoro_ready():
-        try:  # load now and say hello once, so the first real sentence isn't the slow one
-            with _lock:
-                synth(DEFAULT, "Ready.", 1.0)
-        except Exception as e:
-            print("kokoro warm-up failed:", type(e).__name__, e, flush=True)
+        def warm() -> None:
+            # the first calls on a fresh process run at half speed; do them now, in the background (a request that
+            # arrives meanwhile waits for the lock), so the first real sentence isn't the slow one
+            for w in ("Ready.", "Hello. This is a short warm up sentence.",
+                      "I looked at your calendar for tomorrow. You are free in the morning, and busy after lunch."):
+                try:
+                    with _lock:
+                        synth(DEFAULT, w, 1.0)
+                except Exception as e:
+                    print("kokoro warm-up failed:", type(e).__name__, e, flush=True)
+                    return
+        threading.Thread(target=warm, daemon=True).start()
     print(f"voice server on 127.0.0.1:{a.port}, voices: {names()}", flush=True)
     srv.serve_forever()
     return 0

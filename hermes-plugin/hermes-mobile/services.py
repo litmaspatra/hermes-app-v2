@@ -93,7 +93,7 @@ _KOKORO_ERR = {"msg": ""}
 
 TTS_SERVER_SRC = r'''#!/usr/bin/env python3
 """Local voice server on 127.0.0.1:8766 (same API as the old Piper server): Kokoro first, Piper voices as a fallback."""
-import argparse, hmac, io, os, sys, threading, urllib.parse, wave
+import argparse, hmac, io, os, sys, threading, time, urllib.parse, wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -166,7 +166,9 @@ def synth(voice: str, text: str, speed: float) -> bytes:
     speed = max(0.5, min(1.8, speed))
     if voice.startswith("kokoro-") and kokoro_ready():
         v = voice[7:]
+        t0 = time.time()
         a, rate = kokoro().create(text, voice=v, speed=speed, lang=lang(v))
+        print(f"tts {len(text)} chars: made in {time.time() - t0:.2f}s, plays {len(a) / rate:.2f}s", flush=True)
         return to_wav(a, rate)
     cat = piper_catalog()
     name = voice if voice in cat else (sorted(cat)[0] if cat else "")
@@ -455,8 +457,47 @@ def minilm_files_ok() -> bool:
     return all((FB_HOME / "minilm" / n).is_file() and (FB_HOME / "minilm" / n).stat().st_size > 1000 for n in MINILM_FILES)
 
 
+def _minilm_answers() -> bool:
+    """The MiniLM socket accepts a connection (the pid file can name a launcher that already exited)."""
+    s = FB_HOME / "minilm" / "minilm.sock"
+    if not s.exists():
+        return False
+    try:
+        c = socket.socket(socket.AF_UNIX)
+        c.settimeout(1.0)
+        c.connect(str(s))
+        c.close()
+        return True
+    except OSError:
+        return False
+
+
 def minilm_up() -> bool:
-    return (FB_HOME / "minilm" / "minilm.sock").exists() and (FB_HOME / "minilm" / "minilm.pid").is_file() and _pid_alive(FB_HOME / "minilm" / "minilm.pid")
+    if (FB_HOME / "minilm" / "minilm.sock").exists() and (FB_HOME / "minilm" / "minilm.pid").is_file() and _pid_alive(FB_HOME / "minilm" / "minilm.pid"):
+        return True
+    return _minilm_answers()
+
+
+_minilm_fails = {"n": 0, "next": 0.0}
+
+
+def _minilm_start() -> str:
+    """Start MiniLM once, wait up to 25 s for it to answer, and back off (30 s, 60 s … 10 min) if it does not."""
+    if time.time() < _minilm_fails["next"]:
+        return ""
+    rc, out = run(["bash", str(FB_HOME / "bin" / "start-minilm")], 40)
+    for _ in range(25):
+        if minilm_up():
+            break
+        time.sleep(1)
+    if minilm_up():
+        _minilm_fails["n"] = 0
+        _note_start("minilm")
+    else:
+        _minilm_fails["n"] += 1
+        _minilm_fails["next"] = time.time() + min(600, 30 * 2 ** (_minilm_fails["n"] - 1))
+        _note_start("minilm", f"did not come up (rc={rc}): {out[-200:]}")
+    return "minilm"
 
 
 def _pid_alive(pidfile: Path) -> bool:
@@ -617,9 +658,8 @@ def ensure() -> list[str]:
             did.append("bridge")
             _note_start("bridge")
         if minilm_enabled() and minilm_files_ok() and not minilm_up() and (FB_HOME / "bin" / "start-minilm").is_file():
-            rc, _ = run(["bash", str(FB_HOME / "bin" / "start-minilm")], 40)
-            did.append("minilm")
-            _note_start("minilm", "" if rc == 0 else "start-minilm failed")
+            if _minilm_start():
+                did.append("minilm")
     ready = kokoro_files_ok() and kokoro_py() is not None
     if ready and port_open(TTS_PORT) and not any(v.startswith("kokoro-") for v in tts_voices()):
         run(["pkill", "-f", "piper-tts-server.py"], 10)  # the old Piper-only server holds the port: Kokoro replaces it

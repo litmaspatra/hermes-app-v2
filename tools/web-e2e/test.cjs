@@ -249,8 +249,12 @@ async function main() {
   const atBottom = await page.locator('.chat').evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight < 80)
   check(atBottom, 'opens at the bottom')
   const firstSeen = await page.locator('.chat .msg').first().textContent()
-  await page.locator('.chat').evaluate(el => (el.scrollTop = 0))
-  const topBefore = await page.locator('.chat .msg').first().evaluate(el => el.getBoundingClientRect().top)
+  // Scroll and read the first message in ONE synchronous step: the scroll handler (which draws earlier turns above it)
+  // cannot run in between, so this is the same message as `firstSeen` however fast the page is.
+  const topBefore = await page.locator('.chat').evaluate(el => {
+    el.scrollTop = 0
+    return el.querySelector('.msg').getBoundingClientRect().top
+  })
   await page.waitForFunction(n => document.querySelectorAll('.chat .msg').length > n, drawn, { timeout: 5000 }).catch(() => {})
   await sleep(300)
   const topAfter = await page.locator('.chat .msg', { hasText: firstSeen }).first().evaluate(el => el.getBoundingClientRect().top)

@@ -20,6 +20,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import socket
 import sqlite3
 import subprocess
@@ -93,7 +94,7 @@ _KOKORO_ERR = {"msg": ""}
 
 TTS_SERVER_SRC = r'''#!/usr/bin/env python3
 """Local voice server on 127.0.0.1:8766 (same API as the old Piper server): Kokoro first, Piper voices as a fallback."""
-import argparse, hmac, io, os, sys, threading, urllib.parse, wave
+import argparse, hmac, io, os, sys, threading, time, urllib.parse, wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -118,7 +119,15 @@ def kokoro():
     global _k
     if _k is None:
         from kokoro_onnx import Kokoro
-        _k = Kokoro(str(MODEL), str(VOICES))
+        try:  # an explicit thread count: measured ~12% faster than the default on this phone (6 and 8 threads are slower)
+            import onnxruntime as ort
+            so = ort.SessionOptions()
+            so.intra_op_num_threads = int(os.environ.get("HM_TTS_THREADS", "4"))
+            sess = ort.InferenceSession(str(MODEL), sess_options=so, providers=["CPUExecutionProvider"])
+            _k = Kokoro.from_session(sess, str(VOICES))
+        except Exception as e:  # older kokoro-onnx without from_session, or anything unexpected: the default way
+            print("kokoro: default session:", type(e).__name__, e, flush=True)
+            _k = Kokoro(str(MODEL), str(VOICES))
     return _k
 
 
@@ -166,7 +175,9 @@ def synth(voice: str, text: str, speed: float) -> bytes:
     speed = max(0.5, min(1.8, speed))
     if voice.startswith("kokoro-") and kokoro_ready():
         v = voice[7:]
+        t0 = time.time()
         a, rate = kokoro().create(text, voice=v, speed=speed, lang=lang(v))
+        print(f"tts {len(text)} chars: made in {time.time() - t0:.2f}s, plays {len(a) / rate:.2f}s", flush=True)
         return to_wav(a, rate)
     cat = piper_catalog()
     name = voice if voice in cat else (sorted(cat)[0] if cat else "")
@@ -250,11 +261,18 @@ def main() -> int:
     srv = ThreadingHTTPServer(("127.0.0.1", a.port), make_handler(Path(a.key_file)))
     srv.daemon_threads = True
     if kokoro_ready():
-        try:  # load now and say hello once, so the first real sentence isn't the slow one
-            with _lock:
-                synth(DEFAULT, "Ready.", 1.0)
-        except Exception as e:
-            print("kokoro warm-up failed:", type(e).__name__, e, flush=True)
+        def warm() -> None:
+            # the first calls on a fresh process run at half speed; do them now, in the background (a request that
+            # arrives meanwhile waits for the lock), so the first real sentence isn't the slow one
+            for w in ("Ready.", "Hello. This is a short warm up sentence.",
+                      "I looked at your calendar for tomorrow. You are free in the morning, and busy after lunch."):
+                try:
+                    with _lock:
+                        synth(DEFAULT, w, 1.0)
+                except Exception as e:
+                    print("kokoro warm-up failed:", type(e).__name__, e, flush=True)
+                    return
+        threading.Thread(target=warm, daemon=True).start()
     print(f"voice server on 127.0.0.1:{a.port}, voices: {names()}", flush=True)
     srv.serve_forever()
     return 0
@@ -455,8 +473,70 @@ def minilm_files_ok() -> bool:
     return all((FB_HOME / "minilm" / n).is_file() and (FB_HOME / "minilm" / n).stat().st_size > 1000 for n in MINILM_FILES)
 
 
+def _minilm_answers() -> bool:
+    """The MiniLM socket accepts a connection."""
+    try:
+        c = socket.socket(socket.AF_UNIX)
+        c.settimeout(1.0)
+        c.connect(str(FB_HOME / "minilm" / "minilm.sock"))
+        c.close()
+        return True
+    except OSError:
+        return False
+
+
+def _minilm_pid() -> int | None:
+    """The pid in minilm.pid if that process is alive and is the MiniLM service (never another process that reused the number)."""
+    try:
+        pid = int((FB_HOME / "minilm" / "minilm.pid").read_text().strip())
+    except (OSError, ValueError):
+        return None
+    try:
+        return pid if b"minilm-semantic-service" in Path(f"/proc/{pid}/cmdline").read_bytes() else None
+    except OSError:
+        try:
+            os.kill(pid, 0)  # cmdline not readable here: fall back to "is it alive"
+            return pid
+        except OSError:
+            return None
+
+
 def minilm_up() -> bool:
-    return (FB_HOME / "minilm" / "minilm.sock").exists() and (FB_HOME / "minilm" / "minilm.pid").is_file() and _pid_alive(FB_HOME / "minilm" / "minilm.pid")
+    """Up = the service process is alive (the same test start-minilm uses), or its socket answers.
+    The socket FILE is deliberately not required: on some phones it is not visible by path although the service
+    is listening, and judging by it made the supervisor restart a healthy MiniLM every 20 s."""
+    return _minilm_pid() is not None or _minilm_answers()
+
+
+_minilm_state: dict = {"fails": 0, "next": 0.0, "noted": 0.0}
+
+
+def _minilm_tend() -> bool:
+    """Keep MiniLM running and never touch a healthy one. True if it started it.
+    A start waits up to 15 s and counts only if the process is still alive; failures back off (30 s, 60 s … 10 min)."""
+    st, now = _minilm_state, time.time()
+    if minilm_up():
+        st["fails"] = 0
+        pid = _minilm_pid()
+        if pid is not None and not _minilm_answers() and now - st["noted"] > 3600:
+            st["noted"] = now  # evidence for later, once an hour: alive, but the socket cannot be reached by path
+            _log(f"minilm: process {pid} is alive; its socket does not answer from here ({(FB_HOME / 'minilm' / 'minilm.sock').exists()=})")
+        return False
+    if now < st["next"]:
+        return False
+    rc, out = run(["bash", str(FB_HOME / "bin" / "start-minilm")], 40)
+    for _ in range(15):
+        time.sleep(1)
+        if _minilm_pid() is None and rc != 0:
+            break
+    if minilm_up():
+        st["fails"] = 0
+        _note_start("minilm")
+    else:
+        st["fails"] += 1
+        st["next"] = time.time() + min(600, 30 * 2 ** (st["fails"] - 1))
+        _note_start("minilm", f"did not stay up (rc={rc}): {out[-200:]}")
+    return True
 
 
 def _pid_alive(pidfile: Path) -> bool:
@@ -616,10 +696,9 @@ def ensure() -> list[str]:
             spawn("bridge", [sys.executable, str(root / "scripts" / "fastbrain-router-tcp.py"), "--socket", str(router_sock())], FB_HOME / "router" / "tcp.log")
             did.append("bridge")
             _note_start("bridge")
-        if minilm_enabled() and minilm_files_ok() and not minilm_up() and (FB_HOME / "bin" / "start-minilm").is_file():
-            rc, _ = run(["bash", str(FB_HOME / "bin" / "start-minilm")], 40)
-            did.append("minilm")
-            _note_start("minilm", "" if rc == 0 else "start-minilm failed")
+        if minilm_enabled() and minilm_files_ok() and (FB_HOME / "bin" / "start-minilm").is_file():
+            if _minilm_tend():
+                did.append("minilm")
     ready = kokoro_files_ok() and kokoro_py() is not None
     if ready and port_open(TTS_PORT) and not any(v.startswith("kokoro-") for v in tts_voices()):
         run(["pkill", "-f", "piper-tts-server.py"], 10)  # the old Piper-only server holds the port: Kokoro replaces it

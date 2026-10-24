@@ -58,9 +58,9 @@ export function savedStyle(): Style {
 
 export const dynamicColorsOn = (): boolean => {
   try {
-    return localStorage.getItem(DYN_KEY) !== '0'
+    return localStorage.getItem(DYN_KEY) === '1'
   } catch {
-    return true
+    return false
   }
 }
 

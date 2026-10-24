@@ -217,6 +217,9 @@ function BotSheet({ p, onClose, onChanged }: { p: Profile; onClose: () => void; 
           <button className="menu-item" onClick={() => setView('model')}>
             🧩 Default model
           </button>
+          <button className="menu-item" onClick={() => setState({ screen: 'inspect', screenProfile: p.name, screenBack: 'bots' })}>
+            🔍 Inspect (SOUL, memory, skills)
+          </button>
           <button className="menu-item" onClick={() => setView('soul')}>
             ✎ Personality (SOUL.md)
           </button>

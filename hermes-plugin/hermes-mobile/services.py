@@ -20,6 +20,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import socket
 import sqlite3
 import subprocess
@@ -473,31 +474,100 @@ def _minilm_answers() -> bool:
 
 
 def minilm_up() -> bool:
-    if (FB_HOME / "minilm" / "minilm.sock").exists() and (FB_HOME / "minilm" / "minilm.pid").is_file() and _pid_alive(FB_HOME / "minilm" / "minilm.pid"):
-        return True
-    return _minilm_answers()
+    """Up = its socket answers, or (as before) the socket file exists and the pid file names a live process."""
+    d = FB_HOME / "minilm"
+    return _minilm_answers() or ((d / "minilm.sock").exists() and (d / "minilm.pid").is_file() and _pid_alive(d / "minilm.pid"))
 
 
-_minilm_fails = {"n": 0, "next": 0.0}
+_minilm_state: dict = {"fails": 0, "next": 0.0, "stops": [], "noted": 0.0}
 
 
-def _minilm_start() -> str:
-    """Start MiniLM once, wait up to 25 s for it to answer, and back off (30 s, 60 s … 10 min) if it does not."""
-    if time.time() < _minilm_fails["next"]:
-        return ""
+def _minilm_pid() -> int | None:
+    """The pid in minilm.pid if it is really the MiniLM service (never some other process that reused the number)."""
+    try:
+        pid = int((FB_HOME / "minilm" / "minilm.pid").read_text().strip())
+        return pid if b"minilm-semantic-service" in Path(f"/proc/{pid}/cmdline").read_bytes() else None
+    except (OSError, ValueError):
+        return None
+
+
+def _minilm_facts(pid: int) -> str:
+    """What the system says about a MiniLM process whose socket is missing (goes to services.log, to find out why)."""
+    out = []
+    d = FB_HOME / "minilm"
+    try:
+        out.append("dir=" + ",".join(sorted(x.name for x in d.iterdir())))
+    except OSError as e:
+        out.append(f"dir: {e}")
+    try:
+        out.append("proc_unix=" + ";".join(l.split()[-1] for l in Path(f"/proc/{pid}/net/unix").read_text().splitlines() if "minilm" in l)[:200])
+    except OSError as e:
+        out.append(f"proc_unix: {e}")
+    try:
+        out.append("fds=" + ",".join(os.readlink(f"/proc/{pid}/fd/{n}") for n in os.listdir(f"/proc/{pid}/fd"))[:300])
+    except OSError as e:
+        out.append(f"fds: {e}")
+    out.append(f"connect={'ok' if _minilm_answers() else 'fail'} realdir={os.path.realpath(d)}")
+    return " | ".join(out)
+
+
+def _minilm_stop(pid: int) -> None:
+    try:
+        os.kill(pid, signal.SIGTERM)
+        for _ in range(8):
+            time.sleep(0.5)
+            os.kill(pid, 0)  # raises once it is gone
+        os.kill(pid, signal.SIGKILL)
+    except OSError:
+        pass
+    for f in ("minilm.pid", "minilm.sock"):
+        try:
+            (FB_HOME / "minilm" / f).unlink()
+        except OSError:
+            pass
+
+
+def _minilm_tend() -> bool:
+    """Keep MiniLM running and never restart a healthy one. True if it started it.
+    - answering: nothing to do.
+    - process alive but no working socket for over a minute: log the facts, stop it and start it again
+      (at most 3 times an hour, so a cause that keeps deleting the socket cannot become a restart loop).
+    - not running: start it, wait up to 25 s for the socket, and back off (30 s, 60 s … 10 min) if it does not come."""
+    st, now = _minilm_state, time.time()
+    if minilm_up():
+        st["fails"] = 0
+        return False
+    pid = _minilm_pid()
+    if pid is not None:
+        try:
+            age = now - (FB_HOME / "minilm" / "minilm.pid").stat().st_mtime
+        except OSError:
+            age = 0
+        if age < 60:
+            return False  # still loading the model
+        if now - st["noted"] > 600:
+            st["noted"] = now
+            _log(f"minilm: process {pid} runs but its socket does not answer: {_minilm_facts(pid)}")
+        st["stops"] = [t for t in st["stops"] if now - t < 3600]
+        if len(st["stops"]) >= 3:
+            return False
+        st["stops"].append(now)
+        _minilm_stop(pid)
+    if now < st["next"]:
+        return False
     rc, out = run(["bash", str(FB_HOME / "bin" / "start-minilm")], 40)
     for _ in range(25):
         if minilm_up():
             break
         time.sleep(1)
     if minilm_up():
-        _minilm_fails["n"] = 0
+        st["fails"] = 0
         _note_start("minilm")
     else:
-        _minilm_fails["n"] += 1
-        _minilm_fails["next"] = time.time() + min(600, 30 * 2 ** (_minilm_fails["n"] - 1))
+        st["fails"] += 1
+        st["next"] = time.time() + min(600, 30 * 2 ** (st["fails"] - 1))
         _note_start("minilm", f"did not come up (rc={rc}): {out[-200:]}")
-    return "minilm"
+    return True
 
 
 def _pid_alive(pidfile: Path) -> bool:
@@ -657,8 +727,8 @@ def ensure() -> list[str]:
             spawn("bridge", [sys.executable, str(root / "scripts" / "fastbrain-router-tcp.py"), "--socket", str(router_sock())], FB_HOME / "router" / "tcp.log")
             did.append("bridge")
             _note_start("bridge")
-        if minilm_enabled() and minilm_files_ok() and not minilm_up() and (FB_HOME / "bin" / "start-minilm").is_file():
-            if _minilm_start():
+        if minilm_enabled() and minilm_files_ok() and (FB_HOME / "bin" / "start-minilm").is_file():
+            if _minilm_tend():
                 did.append("minilm")
     ready = kokoro_files_ok() and kokoro_py() is not None
     if ready and port_open(TTS_PORT) and not any(v.startswith("kokoro-") for v in tts_voices()):

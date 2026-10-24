@@ -459,114 +459,68 @@ def minilm_files_ok() -> bool:
 
 
 def _minilm_answers() -> bool:
-    """The MiniLM socket accepts a connection (the pid file can name a launcher that already exited)."""
-    s = FB_HOME / "minilm" / "minilm.sock"
-    if not s.exists():
-        return False
+    """The MiniLM socket accepts a connection."""
     try:
         c = socket.socket(socket.AF_UNIX)
         c.settimeout(1.0)
-        c.connect(str(s))
+        c.connect(str(FB_HOME / "minilm" / "minilm.sock"))
         c.close()
         return True
     except OSError:
         return False
 
 
-def minilm_up() -> bool:
-    """Up = its socket answers, or (as before) the socket file exists and the pid file names a live process."""
-    d = FB_HOME / "minilm"
-    return _minilm_answers() or ((d / "minilm.sock").exists() and (d / "minilm.pid").is_file() and _pid_alive(d / "minilm.pid"))
-
-
-_minilm_state: dict = {"fails": 0, "next": 0.0, "stops": [], "noted": 0.0}
-
-
 def _minilm_pid() -> int | None:
-    """The pid in minilm.pid if it is really the MiniLM service (never some other process that reused the number)."""
+    """The pid in minilm.pid if that process is alive and is the MiniLM service (never another process that reused the number)."""
     try:
         pid = int((FB_HOME / "minilm" / "minilm.pid").read_text().strip())
-        return pid if b"minilm-semantic-service" in Path(f"/proc/{pid}/cmdline").read_bytes() else None
     except (OSError, ValueError):
         return None
-
-
-def _minilm_facts(pid: int) -> str:
-    """What the system says about a MiniLM process whose socket is missing (goes to services.log, to find out why)."""
-    out = []
-    d = FB_HOME / "minilm"
     try:
-        out.append("dir=" + ",".join(sorted(x.name for x in d.iterdir())))
-    except OSError as e:
-        out.append(f"dir: {e}")
-    try:
-        out.append("proc_unix=" + ";".join(l.split()[-1] for l in Path(f"/proc/{pid}/net/unix").read_text().splitlines() if "minilm" in l)[:200])
-    except OSError as e:
-        out.append(f"proc_unix: {e}")
-    try:
-        out.append("fds=" + ",".join(os.readlink(f"/proc/{pid}/fd/{n}") for n in os.listdir(f"/proc/{pid}/fd"))[:300])
-    except OSError as e:
-        out.append(f"fds: {e}")
-    out.append(f"connect={'ok' if _minilm_answers() else 'fail'} realdir={os.path.realpath(d)}")
-    return " | ".join(out)
-
-
-def _minilm_stop(pid: int) -> None:
-    try:
-        os.kill(pid, signal.SIGTERM)
-        for _ in range(8):
-            time.sleep(0.5)
-            os.kill(pid, 0)  # raises once it is gone
-        os.kill(pid, signal.SIGKILL)
+        return pid if b"minilm-semantic-service" in Path(f"/proc/{pid}/cmdline").read_bytes() else None
     except OSError:
-        pass
-    for f in ("minilm.pid", "minilm.sock"):
         try:
-            (FB_HOME / "minilm" / f).unlink()
+            os.kill(pid, 0)  # cmdline not readable here: fall back to "is it alive"
+            return pid
         except OSError:
-            pass
+            return None
+
+
+def minilm_up() -> bool:
+    """Up = the service process is alive (the same test start-minilm uses), or its socket answers.
+    The socket FILE is deliberately not required: on some phones it is not visible by path although the service
+    is listening, and judging by it made the supervisor restart a healthy MiniLM every 20 s."""
+    return _minilm_pid() is not None or _minilm_answers()
+
+
+_minilm_state: dict = {"fails": 0, "next": 0.0, "noted": 0.0}
 
 
 def _minilm_tend() -> bool:
-    """Keep MiniLM running and never restart a healthy one. True if it started it.
-    - answering: nothing to do.
-    - process alive but no working socket for over a minute: log the facts, stop it and start it again
-      (at most 3 times an hour, so a cause that keeps deleting the socket cannot become a restart loop).
-    - not running: start it, wait up to 25 s for the socket, and back off (30 s, 60 s … 10 min) if it does not come."""
+    """Keep MiniLM running and never touch a healthy one. True if it started it.
+    A start waits up to 15 s and counts only if the process is still alive; failures back off (30 s, 60 s … 10 min)."""
     st, now = _minilm_state, time.time()
     if minilm_up():
         st["fails"] = 0
+        pid = _minilm_pid()
+        if pid is not None and not _minilm_answers() and now - st["noted"] > 3600:
+            st["noted"] = now  # evidence for later, once an hour: alive, but the socket cannot be reached by path
+            _log(f"minilm: process {pid} is alive; its socket does not answer from here ({(FB_HOME / 'minilm' / 'minilm.sock').exists()=})")
         return False
-    pid = _minilm_pid()
-    if pid is not None:
-        try:
-            age = now - (FB_HOME / "minilm" / "minilm.pid").stat().st_mtime
-        except OSError:
-            age = 0
-        if age < 60:
-            return False  # still loading the model
-        if now - st["noted"] > 600:
-            st["noted"] = now
-            _log(f"minilm: process {pid} runs but its socket does not answer: {_minilm_facts(pid)}")
-        st["stops"] = [t for t in st["stops"] if now - t < 3600]
-        if len(st["stops"]) >= 3:
-            return False
-        st["stops"].append(now)
-        _minilm_stop(pid)
     if now < st["next"]:
         return False
     rc, out = run(["bash", str(FB_HOME / "bin" / "start-minilm")], 40)
-    for _ in range(25):
-        if minilm_up():
-            break
+    for _ in range(15):
         time.sleep(1)
+        if _minilm_pid() is None and rc != 0:
+            break
     if minilm_up():
         st["fails"] = 0
         _note_start("minilm")
     else:
         st["fails"] += 1
         st["next"] = time.time() + min(600, 30 * 2 ** (st["fails"] - 1))
-        _note_start("minilm", f"did not come up (rc={rc}): {out[-200:]}")
+        _note_start("minilm", f"did not stay up (rc={rc}): {out[-200:]}")
     return True
 
 

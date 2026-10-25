@@ -115,19 +115,25 @@ def lang(v: str) -> str:
     return {"a": "en-us", "b": "en-gb", "h": "hi"}.get(v[:1], "en-us")
 
 
+_kload = threading.Lock()
+
+
 def kokoro():
     global _k
     if _k is None:
-        from kokoro_onnx import Kokoro
-        try:  # an explicit thread count: measured ~12% faster than the default on this phone (6 and 8 threads are slower)
-            import onnxruntime as ort
-            so = ort.SessionOptions()
-            so.intra_op_num_threads = int(os.environ.get("HM_TTS_THREADS", "4"))
-            sess = ort.InferenceSession(str(MODEL), sess_options=so, providers=["CPUExecutionProvider"])
-            _k = Kokoro.from_session(sess, str(VOICES))
-        except Exception as e:  # older kokoro-onnx without from_session, or anything unexpected: the default way
-            print("kokoro: default session:", type(e).__name__, e, flush=True)
-            _k = Kokoro(str(MODEL), str(VOICES))
+        with _kload:  # one load, even when a request and the background warm-up arrive together
+            if _k is None:
+                from kokoro_onnx import Kokoro
+                try:  # an explicit thread count: measured ~12% faster than the default on this phone (6 and 8 threads are slower)
+                    import onnxruntime as ort
+                    so = ort.SessionOptions()
+                    so.intra_op_num_threads = int(os.environ.get("HM_TTS_THREADS", "4"))
+                    sess = ort.InferenceSession(str(MODEL), sess_options=so, providers=["CPUExecutionProvider"])
+                    k = Kokoro.from_session(sess, str(VOICES))
+                except Exception as e:  # older kokoro-onnx without from_session, or anything unexpected: the default way
+                    print("kokoro: default session:", type(e).__name__, e, flush=True)
+                    k = Kokoro(str(MODEL), str(VOICES))
+                _k = k
     return _k
 
 
@@ -148,7 +154,7 @@ def names() -> list:
     out = []
     if kokoro_ready():
         try:
-            have = set(kokoro().get_voices())
+            have = set(_k.get_voices()) if _k is not None else set(WANTED)  # listing voices must not load the model
             out += ["kokoro-" + v for v in WANTED if v in have]
         except Exception:
             pass
@@ -258,7 +264,11 @@ def main() -> int:
     p.add_argument("--port", type=int, default=8766)
     p.add_argument("--key-file", default=os.environ.get("HERMES_MOBILE_KEY_FILE", "/data/data/com.termux/files/home/.hermes-mobile/key"))
     a = p.parse_args()
-    srv = ThreadingHTTPServer(("127.0.0.1", a.port), make_handler(Path(a.key_file)))
+    try:
+        srv = ThreadingHTTPServer(("127.0.0.1", a.port), make_handler(Path(a.key_file)))
+    except OSError as e:  # another voice server already holds the port: leave it alone, do not load a second model
+        print(f"port {a.port} is taken ({e}); a voice server is already running", flush=True)
+        return 0
     srv.daemon_threads = True
     if kokoro_ready():
         def warm() -> None:
@@ -350,19 +360,55 @@ def run(cmd: list[str], timeout: float = 120, env: dict | None = None) -> tuple[
         return 127, f"{type(e).__name__}: {e}"
 
 
+_spawn_state: dict[str, dict] = {}
+
+
+def _alive_as(pid: int, marker: str) -> bool:
+    try:
+        return marker.encode() in Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return False
+
+
 def spawn(name: str, cmd: list[str], log: Path, env: dict | None = None) -> None:
-    """Start a long-running child detached from Hermes' terminal (own session), once."""
+    """Start a long-running child detached from Hermes' terminal (own session), once.
+    - Another supervisor process (the plugin, the app's helper, a Doctor fix) may already run it: its pid file says so.
+    - A child that dies within a minute is restarted only after 30 s, 60 s … (at most 2 min), and why it died is logged."""
+    marker = next((os.path.basename(a) for a in cmd[1:] if not a.startswith("-")), os.path.basename(cmd[0]))
+    pf = STATE_DIR / f"{name}.pid"
+    try:
+        if _alive_as(int(pf.read_text().strip()), marker):
+            return
+    except (OSError, ValueError):
+        pass
+    st = _spawn_state.setdefault(name, {"t": 0.0, "fails": 0, "next": 0.0})
     old = _children.get(name)
-    if old is not None and old.poll() is None:
+    if old is not None:
+        if old.poll() is None:
+            return
+        if st["t"]:
+            lived = time.time() - st["t"]
+            _log(f"{name} exited rc={old.returncode} after {lived:.0f}s")
+            st["fails"] = st["fails"] + 1 if lived < 60 else 0
+            st["next"] = time.time() + min(120, 30 * 2 ** (st["fails"] - 1)) if st["fails"] else 0.0
+            st["t"] = 0.0
+    if time.time() < st["next"]:
         return
     log.parent.mkdir(parents=True, exist_ok=True)
     f = open(log, "ab")
     _children[name] = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.STDOUT, start_new_session=True,
                                        env={**os.environ, **(env or {})})
+    st["t"] = time.time()
+    try:
+        pf.write_text(str(_children[name].pid))
+    except OSError:
+        pass
 
 
 def py_ok(py: str, code: str) -> bool:
-    return run([py, "-c", code], 25)[0] == 0
+    """True if `code` runs in `py`. A probe that only times out (a swapping, overloaded phone) counts as ok: a package
+    that is really missing fails at once, and calling a slow import "missing" made the helper reinstall working things."""
+    return run([py, "-c", code], 90)[0] in (0, 124)
 
 
 def pythons(*names: str) -> list[str]:
@@ -438,7 +484,7 @@ def write_tts_server() -> Path:
 def tts_voices() -> list[str]:
     try:
         req = urllib.request.Request(f"http://127.0.0.1:{TTS_PORT}/voices", headers={"X-Hermes-Mobile-Key": read_key()})
-        with urllib.request.urlopen(req, timeout=4) as r:
+        with urllib.request.urlopen(req, timeout=8) as r:
             return r.read().decode().split()
     except Exception:
         return []
@@ -820,9 +866,9 @@ def _step(msg: str) -> None:
 
 def _pip(pkgs: list[str], py: str | None = None) -> tuple[int, str]:
     py = py or shutil.which("python3") or sys.executable
-    rc, out = run([py, "-m", "pip", "install", "--upgrade", *pkgs], 900)
+    rc, out = run([py, "-m", "pip", "install", *pkgs], 900)  # no --upgrade: never replace an install that works
     if rc != 0 and "externally-managed" in out.lower():
-        rc, out = run([py, "-m", "pip", "install", "--break-system-packages", "--upgrade", *pkgs], 900)
+        rc, out = run([py, "-m", "pip", "install", "--break-system-packages", *pkgs], 900)
     return rc, out
 
 

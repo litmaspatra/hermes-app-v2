@@ -47,6 +47,8 @@ public class HermesService extends Service {
     ServerSocket server;
     String key;
     String lastStatus = "Ready";
+    String aiWord = ""; // Hermes' own thinking word ("Pondering…"), shown on the chip instead of generic text
+    long aiWordAt = 0;
     String lastShort = "";
     String lastSession = null;
     long workingSince = 0;
@@ -404,7 +406,18 @@ public class HermesService extends Service {
                 boolean working = e.optBoolean("working", false);
                 if (working && workingSince == 0) workingSince = System.currentTimeMillis();
                 if (!working) workingSince = 0;
-                lastStatus = body.isEmpty() ? (working ? "Working…" : "Ready") : body;
+                // While Hermes thinks, the chip and card show Hermes' own word; the plugin's generic "Thinking…" and the
+                // page's "Working…" beats must not overwrite it (for 30 s, so a long silent tool shows its own text again).
+                boolean isWord = e.optBoolean("word", false);
+                long nowMs = System.currentTimeMillis();
+                if (working && isWord) {
+                    aiWord = body;
+                    aiWordAt = nowMs;
+                }
+                if (!working) aiWord = "";
+                String shown = body;
+                if (working && !isWord && !aiWord.isEmpty() && nowMs - aiWordAt < 30_000) shown = aiWord;
+                lastStatus = shown.isEmpty() ? (working ? "Working…" : "Ready") : shown;
                 lastShort = working ? e.optString("short", "Hermes") : "";
                 if (session != null && !session.isEmpty()) lastSession = session;
                 lastSub = profile.isEmpty() || "default".equals(profile) ? null : profile;
@@ -617,9 +630,17 @@ public class HermesService extends Service {
     static final int GOLD = Color.parseColor("#D9A441"), GREEN = Color.parseColor("#3DBE7A"),
             RED = Color.parseColor("#E5564B"), AMBER = Color.parseColor("#E8912D");
 
-    /** True when the app's own floating island is on screen duty: then the system's island (Live Update chip) stays off. */
+    /** Which island is used: "system" (the phone's island, fed by the status Live Update) or "app" (the floating pet).
+     *  Never both. Installs from before the choice existed: the system chip being on means "system". */
+    static String islandTarget(android.content.SharedPreferences sp) {
+        String t = sp.getString("island_target", null);
+        if ("system".equals(t) || "app".equals(t)) return t;
+        return sp.getBoolean("system_chip", false) ? "system" : "app";
+    }
+
+    /** True when the system island is the chosen one: the status notification then asks to be promoted to the chip. */
     boolean systemChipWanted() {
-        return getSharedPreferences("hm", MODE_PRIVATE).getBoolean("system_chip", false); // only if you turn it on
+        return "system".equals(islandTarget(getSharedPreferences("hm", MODE_PRIVATE)));
     }
 
     /**
@@ -1387,7 +1408,7 @@ public class HermesService extends Service {
     // ── the island ──
     /** Main thread: start or stop the island to match the setting and the "display over other apps" permission. */
     void refreshIsland() {
-        boolean want = getSharedPreferences("hm", MODE_PRIVATE).getBoolean("island", true) && IslandOverlay.canShow(this);
+        boolean want = !systemChipWanted() && getSharedPreferences("hm", MODE_PRIVATE).getBoolean("island", true) && IslandOverlay.canShow(this);
         if (want && island == null) {
             island = new IslandOverlay(this);
             island.setSuppressed(MainActivity.visible);
@@ -1429,7 +1450,7 @@ public class HermesService extends Service {
         s.main.post(() -> {
             try {
                 if (!s.lastWorking) return; // only while a turn runs; the page's "working" beat starts it
-                s.onEvent(new JSONObject().put("kind", "status").put("working", true).put("body", text).put("short", "Hermes"));
+                s.onEvent(new JSONObject().put("kind", "status").put("working", true).put("body", text).put("short", "Hermes").put("word", true));
             } catch (Exception ignored) {
             }
         });

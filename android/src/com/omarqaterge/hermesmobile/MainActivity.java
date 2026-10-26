@@ -1224,7 +1224,7 @@ public class MainActivity extends Activity {
 
         // ── v2: island, voice, approvals, themes (Settings screens in the page talk to these) ──
         private final String[] BOOL_PREFS = {"island", "auto_readonly", "voice_enabled", "voice_calls_locked", "voice_msgs_locked", "island_approvals", "system_chip", "reduce_effects", "voice_fastbrain", "voice_hermes", "voice_follow", "pet_snap", "voice_neural"};
-        private final String[] STR_PREFS = {"island_mode", "theme", "voice_lang", "pet", "pet_pos"};
+        private final String[] STR_PREFS = {"island_mode", "theme", "voice_lang", "pet", "pet_pos", "island_target", "island_glass", "island_size"};
 
         /** All native settings as JSON, with their defaults. */
         @JavascriptInterface
@@ -1235,6 +1235,10 @@ public class MainActivity extends Activity {
                 return new JSONObject()
                         .put("island", sp.getBoolean("island", true))
                         .put("island_mode", sp.getString("island_mode", "ondemand"))
+                        .put("island_target", HermesService.islandTarget(sp))
+                        .put("island_glass", sp.getString("island_glass", "off"))
+                        .put("island_size", sp.getString("island_size", "full"))
+                        .put("system_ok", android.os.Build.VERSION.SDK_INT >= 36)
                         .put("overlay", android.provider.Settings.canDrawOverlays(MainActivity.this))
                         .put("theme", sp.getString("theme", "material"))
                         .put("reduce_effects", sp.getBoolean("reduce_effects", false))
@@ -1429,8 +1433,14 @@ public class MainActivity extends Activity {
                 known = true;
             }
             if (!known) return;
+            if ("island_target".equals(name)) { // one island, not both: keep the older flags in step
+                if ("app".equals(value)) ed.putBoolean("island", true).putBoolean("system_chip", false);
+                else if ("system".equals(value)) ed.putBoolean("system_chip", true);
+                else return;
+            }
             ed.apply();
-            if ("island".equals(name) && "true".equals(value) && !android.provider.Settings.canDrawOverlays(MainActivity.this)) runOnUiThread(MainActivity.this::openOverlaySettings);
+            boolean wantsApp = "island".equals(name) && "true".equals(value) || "island_target".equals(name) && "app".equals(value);
+            if (wantsApp && !android.provider.Settings.canDrawOverlays(MainActivity.this)) runOnUiThread(MainActivity.this::openOverlaySettings);
             HermesService.refreshIslandAsync();
         }
 

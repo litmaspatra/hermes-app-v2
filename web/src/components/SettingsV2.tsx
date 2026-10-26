@@ -122,16 +122,52 @@ const SPOTS = [
 export function IslandPage() {
   const [s, set] = useNative()
   if (!hasNativeV2() || !s) return <NoPhone />
+  const app = s.island_target === 'app'
   return (
     <>
-      <Section footer="An animated pet that sits just under the system island and shows what Hermes is doing, shows voice listening, and takes files you drag onto it. It needs “Display over other apps”.">
-        <ToggleRow icon="🫧" tone="gold" title="Floating pet" on={s.island} onChange={v => set('island', v)} />
-        {s.island && !s.overlay && <Row icon="⚠️" tone="red" title="Allow display over other apps" sub="Needed for the island" chevron onClick={() => openOverlaySettings()} />}
+      <Section
+        title="Which island"
+        footer="Use one island, not both. System island: drawn by the phone itself (OriginOS, HyperOS, Android 16). It shows Hermes' own status words (pondering, deliberating…), a progress bar and the approval buttons, and Hermes appears in the phone's drag tray. Floating pet: Hermes' own animated pet that sits on top of other apps; it needs “Display over other apps”."
+      >
+        <Segmented
+          options={[{ value: 'system' as const, label: 'System island' }, { value: 'app' as const, label: 'Floating pet' }]}
+          value={s.island_target}
+          onChange={v => set('island_target', v)}
+        />
+        {app && !s.overlay && <Row icon="⚠️" tone="red" title="Allow display over other apps" sub="Needed for the floating pet" chevron onClick={() => openOverlaySettings()} />}
+        {!app && !s.system_ok && <Row icon="ℹ️" tone="gray" title="This phone is below Android 16" sub="The status card still shows, but the island chip depends on the phone's skin" />}
       </Section>
-      {s.island && (
+      {!app && (
+        <Section
+          title="Drag and drop"
+          footer="Drag an image, file, text or link from another app, then drop it on “Ask Hermes” in the phone's drag tray (or use Share → Ask Hermes). A small window opens where you say what Hermes should do. If Ask Hermes is not in the tray yet, share something to it once from the share sheet; phones rank the tray by use."
+        >
+          <Row icon="🖼" tone="blue" title="Ask Hermes" sub="Opens a small window; Hermes works in the background" />
+        </Section>
+      )}
+      {app && (
         <>
           <PetGallery initial={s.pet.startsWith('ap-') ? s.pet.slice(3) : ''} />
-          <Section title="Position" footer="Always just under the status bar or on the upper part of a side, never the lower part of the screen. Wander strolls between spots every half minute or so when it is just hanging around. Drag the pet anywhere (also over the area an app's drag-and-drop covers): it stays exactly where you drop it. Turn on “Snap to spots” to make it jump to the nearest spot instead.">
+          <Section title="When to show it" footer="Peek at the edge: the pet rests at the side of the screen with just a sliver showing, comes out when Hermes works or you drag something, and goes back after a few seconds. On demand: hidden while idle (a tiny invisible strip stays so a drag has somewhere to land). Always: the pet stays out.">
+            <Segmented
+              options={[{ value: 'peek' as const, label: 'Peek at edge' }, { value: 'ondemand' as const, label: 'On demand' }, { value: 'always' as const, label: 'Always' }]}
+              value={s.island_mode}
+              onChange={v => set('island_mode', v)}
+            />
+          </Section>
+          <Section title="Size and look" footer="Compact: while Hermes works only the pet shows, at the side, and the words stay hidden (approvals, voice and drops still open the full card). Glass: how see-through the pet card is while it just shows status.">
+            <Segmented
+              options={[{ value: 'full' as const, label: 'Full card' }, { value: 'compact' as const, label: 'Compact, at the side' }]}
+              value={s.island_size}
+              onChange={v => set('island_size', v)}
+            />
+            <Segmented
+              options={[{ value: 'off' as const, label: 'Solid' }, { value: 'soft' as const, label: 'Glass' }, { value: 'strong' as const, label: 'Ghost' }]}
+              value={s.island_glass}
+              onChange={v => set('island_glass', v)}
+            />
+          </Section>
+          <Section title="Position" footer="Just under the status bar or on the upper part of a side. Wander strolls between spots every half minute when the pet is out and idle. Drag the pet anywhere to pin it; Peek at edge uses the side you pick here.">
             <div className="pet-grid">
               {SPOTS.map(p => (
                 <button key={p.id} className={`pet-card${s.pet_pos === p.id ? ' on' : ''}`} onClick={() => { haptic(); set('pet_pos', p.id) }}>
@@ -141,19 +177,11 @@ export function IslandPage() {
               ))}
             </div>
           </Section>
-          <Section title="When to show it" footer="On demand: hidden while idle. It appears when Hermes works, an approval waits, you drag something, or you trigger voice. A tiny invisible strip stays where the pet last sat so a drag has somewhere to land, and it blocks touches in that spot.">
-            <Segmented
-              options={[{ value: 'ondemand', label: 'On demand' }, { value: 'always', label: 'Always' }]}
-              value={s.island_mode}
-              onChange={v => set('island_mode', v)}
-            />
-          </Section>
-          <Section footer="Approvals are asked once: on the floating pet (text and buttons), and in a notification only when the pet can't show them (it is off, or the phone is locked). The system island can't show the animated pet, so it is off by default; turn it on only if you want its status chip as well.">
+          <Section footer="Approvals are asked once: on the floating pet (text and buttons), and in a notification only when the pet can't show them (it is off, or the phone is locked).">
             <ToggleRow icon="🛡" tone="green" title="Approval buttons on the floating pet" on={s.island_approvals} onChange={v => set('island_approvals', v)} />
             <ToggleRow icon="📌" tone="gray" title="Snap to spots after dragging" on={s.pet_snap} onChange={v => set('pet_snap', v)} />
-            <ToggleRow icon="🏝" tone="gray" title="Also use the system island (static icon)" on={s.system_chip} onChange={v => set('system_chip', v)} />
           </Section>
-          <Section title="Drag and drop" footer="Drag an image, file, text or link from another app (gallery, browser, files) onto the floating pet. Android doesn't let apps receive drops on the system island itself, so the drop target is the pet, which appears under the system island while you drag. Type what Hermes should do and it runs in the background. The other app must support dragging out; if not, use Share → Hermes.">
+          <Section title="Drag and drop" footer="Drag an image, file, text or link from another app onto the floating pet; it comes out for the drag and a card asks what to do with it.">
             <Row icon="🖼" tone="blue" title="Drop to ask" sub="No setting needed" />
           </Section>
         </>

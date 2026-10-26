@@ -117,6 +117,8 @@ final class IslandOverlay {
     private String curAnchor = "tc";
     private ValueAnimator mover;
     private boolean dragMoving, lastFull;
+    private boolean peeking, lastPeek, compactNow; // idle at the screen edge / working as a bare pet at the side
+    private long popUntil;
     private String lastPref;
     private float touchX, touchY;
     private int startX, startY;
@@ -255,7 +257,13 @@ final class IslandOverlay {
         LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-2, -2);
         tp.setMarginStart(dp(4));
         header.addView(texts, tp);
-        header.setOnClickListener(v -> svc.islandOpenApp());
+        header.setOnClickListener(v -> {
+            if (peeking) { // a tap on the peeking pet brings it out for a few seconds; a second tap opens the app
+                lingerUntil = SystemClock.uptimeMillis() + 6000;
+                main.postDelayed(this::render, 6100);
+                render();
+            } else svc.islandOpenApp();
+        });
         // Drag the pet to move it; it snaps to the nearest spot and stays there (Settings → Island → Position).
         header.setOnTouchListener((v, e) -> {
             switch (e.getActionMasked()) {
@@ -424,30 +432,41 @@ final class IslandOverlay {
         if (destroyed || root == null) return;
         long now = SystemClock.uptimeMillis();
         boolean idle = state.mood == Mood.SLEEP;
-        boolean always = "always".equals(svc.getSharedPreferences("hm", Context.MODE_PRIVATE).getString("island_mode", "ondemand"));
+        android.content.SharedPreferences sp = svc.getSharedPreferences("hm", Context.MODE_PRIVATE);
+        String mode = sp.getString("island_mode", "ondemand");
+        boolean always = "always".equals(mode);
         boolean noting = noteUntil > now;
         // Shown in full when Hermes is busy, an approval waits, a drag/drop/voice is going on, for a moment after it
         // finishes, or always if the user chose that. Otherwise only an invisible strip stays so a drag has a target.
         boolean full = !idle || listening || dragging || panelOpen || noting || lingerUntil > now || (always && !hiddenIdle);
+        // Peek: idle, the pet rests at the edge with only a sliver showing. Compact: working, only the bare pet at the side.
+        boolean peek = !full && "peek".equals(mode);
+        boolean compact = full && "compact".equals(sp.getString("island_size", "full")) && !listening && !dragging && !panelOpen && !noting
+                && state.approval == null;
+        peeking = peek;
+        compactNow = compact;
         if (suppressed && !listening) {
             remove();
             return;
         }
         ensureAdded();
-        if (full && !lastFull && added) { // appears with a soft pop instead of snapping in
+        if (full && !lastFull && !lastPeek && added) { // appears with a soft pop instead of snapping in (from the edge it slides out)
+            popUntil = now + 320;
             root.setPivotX(root.getWidth() / 2f);
             root.setPivotY(0f);
             root.setAlpha(0f);
             root.setScaleX(0.9f);
             root.setScaleY(0.9f);
-            root.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(260).setInterpolator(new android.view.animation.OvershootInterpolator(1.0f)).start();
+            root.animate().alpha(targetAlpha(full, peek)).scaleX(1f).scaleY(1f).setDuration(260).setInterpolator(new android.view.animation.OvershootInterpolator(1.0f)).start();
         }
         lastFull = full;
+        boolean peekChanged = peek != lastPeek; // sliding out of / back to the edge
+        lastPeek = peek;
         String pp = posPref();
         boolean moved = lastPref != null && !pp.equals(lastPref); // the user picked another spot in Settings: walk there
         lastPref = pp;
-        place(moved);
-        applyTheme(full);
+        place(moved || peekChanged);
+        applyTheme(full, peek);
 
         boolean approving = state.approval != null;
         Mood m = listening ? Mood.LISTEN : dragging ? Mood.DROP : state.mood;
@@ -472,6 +491,10 @@ final class IslandOverlay {
         title.setVisibility(t.isEmpty() ? View.GONE : View.VISIBLE);
         sub.setText(s);
         sub.setVisibility(s.isEmpty() || t.isEmpty() ? View.GONE : View.VISIBLE);
+        if (compact) { // working, compact: just the pet; the words are on the system island or in the app
+            title.setVisibility(View.GONE);
+            sub.setVisibility(View.GONE);
+        }
 
         // Approvals live in the system island (notification buttons). The floating pet only shows buttons if asked to.
         boolean showApproval = approving && !dragging && !listening && svc.getSharedPreferences("hm", Context.MODE_PRIVATE).getBoolean("island_approvals", true);
@@ -497,16 +520,26 @@ final class IslandOverlay {
         }
         dropBox.setVisibility(panelOpen && !dragging && !listening ? View.VISIBLE : View.GONE);
 
-        root.setMinimumWidth(!full ? dp(120) : dragging ? dp(250) : panelOpen || showApproval ? dp(320) : 0);
-        root.setMinimumHeight(!full ? dp(20) : dragging ? dp(64) : 0);
+        root.setMinimumWidth(!full ? (peek ? 0 : dp(120)) : dragging ? dp(250) : panelOpen || showApproval ? dp(320) : 0);
+        root.setMinimumHeight(!full ? (peek ? 0 : dp(20)) : dragging ? dp(64) : 0);
+        if (now >= popUntil) root.setAlpha(targetAlpha(full, peek));
         root.invalidate();
     }
 
+    /** How see-through the island is: a resting (peeking) pet is faint; a working one follows the Glass setting;
+     *  anything that needs a tap or a read (approval, drop prompt, voice, a note) is solid. */
+    private float targetAlpha(boolean full, boolean peek) {
+        if (peek) return 0.55f;
+        if (!full || panelOpen || dragging || listening || state.approval != null || noteUntil > SystemClock.uptimeMillis()) return 1f;
+        String g = svc.getSharedPreferences("hm", Context.MODE_PRIVATE).getString("island_glass", "off");
+        return "strong".equals(g) ? 0.45f : "soft".equals(g) ? 0.72f : 1f;
+    }
+
     /** The island's frame and text follow the app theme (SharedPreferences "hm" key "theme"); the pet never changes. */
-    private void applyTheme(boolean full) {
+    private void applyTheme(boolean full, boolean peek) {
         String th = svc.getSharedPreferences("hm", Context.MODE_PRIVATE).getString("theme", "material");
         boolean night = (svc.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
-        col.setVisibility(full ? View.VISIBLE : View.GONE);
+        col.setVisibility(full || peek ? View.VISIBLE : View.GONE);
         int stroke = dragging ? GOLD : strokeFor(listening ? Mood.LISTEN : state.mood);
         Drawable bgd;
         int padR = dp(12), padB = dp(6);
@@ -671,8 +704,10 @@ final class IslandOverlay {
         String pref = posPref();
         String a = "wander".equals(pref) ? curAnchor : pref;
         curAnchor = a;
+        // Compact (working) sits on the nearest side; peeking (idle) rests half off the screen edge.
+        String spot = compactNow && !"free".equals(pref) ? ("tl".equals(a) || "ml".equals(a) ? "ml" : "mr") : a;
         int w = root.getWidth() > 0 ? root.getWidth() : dp(120);
-        int[] t = "free".equals(pref) ? freeXY(w) : anchorXY(a, w);
+        int[] t = peeking ? peekXY(w) : "free".equals(pref) ? freeXY(w) : anchorXY(spot, w);
         if (lp.x == t[0] && lp.y == t[1]) return;
         if (mover != null && mover.isRunning()) return; // already walking; the end of the walk re-checks
         if (!animate) {
@@ -705,11 +740,23 @@ final class IslandOverlay {
         mover.start();
     }
 
+    /** Idle "peek": the pet rests at the edge of the screen with only a sliver showing; a tap or a drag brings it out. */
+    private int[] peekXY(int w) {
+        DisplayMetrics dm = svc.getResources().getDisplayMetrics();
+        String pref = posPref();
+        boolean left = "tl".equals(pref) || "ml".equals(pref)
+                || ("free".equals(pref) && svc.getSharedPreferences("hm", Context.MODE_PRIVATE).getFloat("pet_fx", 0.5f) < 0.5f)
+                || ("wander".equals(pref) && ("tl".equals(curAnchor) || "ml".equals(curAnchor)));
+        int show = dp(22);
+        int y = "free".equals(pref) ? freeXY(w)[1] : anchorXY(left ? "ml" : "mr", w)[1];
+        return new int[] {left ? show - w : dm.widthPixels - show, y};
+    }
+
     /** Every 20–40 s, if the pet is just hanging around, it strolls to another spot. */
     private void wander() {
         main.postDelayed(wanderTick, 20_000 + (long) (Math.random() * 20_000));
         if (destroyed || !added || !"wander".equals(posPref()) || !lastFull) return;
-        if (listening || dragging || panelOpen || state.approval != null || dragMoving || suppressed) return;
+        if (listening || dragging || panelOpen || state.approval != null || dragMoving || suppressed || peeking || compactNow) return;
         String next = curAnchor;
         for (int i = 0; i < 6 && next.equals(curAnchor); i++) next = ANCHORS[(int) (Math.random() * ANCHORS.length)];
         curAnchor = next;
@@ -812,9 +859,8 @@ final class IslandOverlay {
         place(true);
     }
 
-    /** Top of the island. With the system's own island also on, sit below the status bar so it doesn't cover ours. */
+    /** Top of the island: just below the status bar, so the clock and icons stay readable. */
     private int topOffset() {
-        if (!svc.systemChipWanted()) return dp(6); // no system island: use the very top
         int id = svc.getResources().getIdentifier("status_bar_height", "dimen", "android");
         int bar = id > 0 ? svc.getResources().getDimensionPixelSize(id) : dp(28);
         return bar + dp(4);

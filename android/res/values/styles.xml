@@ -5,6 +5,14 @@
         <item name="android:navigationBarColor">@color/bg</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>
+    <!-- "Ask Hermes" window: transparent, so only its rounded card shows over whatever app is behind it. -->
+    <style name="HermesShare" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
     <color name="bg">#0E1115</color>
     <color name="gold">#D9A441</color>
     <color name="icon_bg">#FFFFFF</color>

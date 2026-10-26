@@ -1,3 +1,4 @@
+import { statusWord } from './statusword'
 // The native side of the app. Inside the Android shell `window.HermesAndroid` is a
 // Java object (addJavascriptInterface); in a plain browser (development) the same
 // capabilities come from URL parameters or are no-ops.
@@ -278,7 +279,11 @@ export function shareText(title: string, text: string): boolean {
 // ── v2: island, voice commands, read-only auto-approve, History ──
 export interface NativeSettings {
   island: boolean
-  island_mode: 'ondemand' | 'always'
+  island_mode: 'ondemand' | 'always' | 'peek'
+  island_target: 'system' | 'app'
+  island_glass: 'off' | 'soft' | 'strong'
+  island_size: 'full' | 'compact'
+  system_ok: boolean
   overlay: boolean
   theme: string
   reduce_effects: boolean
@@ -366,13 +371,13 @@ export const ttsVoices = (): string[] => (nat()?.ttsVoices?.() || '').split(',')
 export const neuralTtsStatus = (): string => nat()?.neuralTtsStatus?.() ?? 'not available'
 export const testVoice = (): void => nat()?.testVoice?.()
 export const setTtsVoice = (v: string): void => nat()?.setTtsVoice?.(v)
-/** The thinking word Hermes shows in the chat ("Pondering…") for the island chip; at most one per 2 s, short single words only. */
+/** The word Hermes shows while it thinks ("Pondering…") for the island chip; one per 2 s, short plain words only. */
 let lastWord = ''
 let lastWordAt = 0
 export const reportStatusWord = (text: string): void => {
-  const t = text.replace(/\s+/g, ' ').trim()
+  const t = statusWord(text)
   const now = Date.now()
-  if (!t || t.length > 40 || t === lastWord || now - lastWordAt < 2000) return
+  if (!t || t === lastWord || now - lastWordAt < 2000) return
   lastWord = t
   lastWordAt = now
   try {

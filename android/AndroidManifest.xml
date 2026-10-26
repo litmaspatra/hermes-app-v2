@@ -47,6 +47,31 @@
         android:theme="@style/HermesTheme"
         android:networkSecurityConfig="@xml/network_security_config"
         android:allowBackup="false">
+        <!-- "Ask Hermes": the small window for what is shared or dragged to Hermes (share sheet, the phone's drag tray).
+             Its own task, so it never drags the whole app to the front; the chosen island does not matter to it. -->
+        <activity
+            android:name=".ShareDropActivity"
+            android:exported="true"
+            android:label="Ask Hermes"
+            android:icon="@mipmap/ic_launcher"
+            android:theme="@style/HermesShare"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:windowSoftInputMode="adjustResize|stateVisible"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|keyboard|uiMode|density">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+                <data android:mimeType="audio/*" />
+                <data android:mimeType="text/*" />
+                <data android:mimeType="application/pdf" />
+                <data android:mimeType="application/*" />
+            </intent-filter>
+        </activity>
         <activity
             android:name=".MainActivity"
             android:exported="true"

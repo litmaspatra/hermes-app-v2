@@ -23,7 +23,7 @@ import type {
   TranscriptMessage,
   Usage
 } from '@hermes/shared/gateway-contract.generated'
-import { appInBackground, approvalAnswered, cancelNotification, reportWorking, notify, setLastChat, startHermes, wsUrl } from './bridge'
+import { appInBackground, approvalAnswered, cancelNotification, reportStatusWord, reportWorking, notify, setLastChat, startHermes, wsUrl } from './bridge'
 import {
   type ActiveSession,
   type Attachment,
@@ -1023,9 +1023,11 @@ client.onEvent((ev: GatewayEvent) => {
       break
     case 'thinking.delta':
       updateActive(() => ({ status: String(payload.text || '') }))
+      reportStatusWord(String(payload.text || ''))
       break
     case 'status.update':
       updateActive(() => ({ status: String(payload.text || '') }))
+      reportStatusWord(String(payload.text || ''))
       break
     case 'reasoning.delta':
       queueDelta('reasoning', String(payload.text || ''))

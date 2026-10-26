@@ -1422,6 +1422,19 @@ public class HermesService extends Service {
         });
     }
 
+    /** A short status word from the chat page ("Pondering…"): shown on the chip while a turn runs. */
+    static void pageStatus(String text) {
+        HermesService s = instance;
+        if (s == null || text == null || text.isEmpty() || text.length() > 40) return;
+        s.main.post(() -> {
+            try {
+                if (!s.lastWorking) return; // only while a turn runs; the page's "working" beat starts it
+                s.onEvent(new JSONObject().put("kind", "status").put("working", true).put("body", text).put("short", "Hermes"));
+            } catch (Exception ignored) {
+            }
+        });
+    }
+
     static void appVisibility(boolean visible) {
         HermesService s = instance;
         if (s != null) s.main.post(() -> s.onAppVisibility(visible));

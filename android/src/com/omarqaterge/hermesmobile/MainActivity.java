@@ -1334,6 +1334,12 @@ public class MainActivity extends Activity {
             if (ok(key)) HermesService.pageWorking(working);
         }
 
+        /** The thinking word the chat shows ("Pondering…"), for the island chip. */
+        @JavascriptInterface
+        public void pageStatus(String key, String text) {
+            if (ok(key)) HermesService.pageStatus(text);
+        }
+
         /** Is the natural-voice server up? Plain words. Blocking. */
         @JavascriptInterface
         public String neuralTtsStatus(String key) {

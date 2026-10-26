@@ -44,6 +44,7 @@ interface AndroidBridge {
   approvalAnswered?(requestId: string, session: string, command: string, description: string): void
   voiceReply?(text: string): void
   pageWorking?(working: boolean): void
+  pageStatus?(text: string): void
   fastbrainStatus?(): string
   neuralTtsStatus?(): string
   ttsVoices?(): string
@@ -365,6 +366,21 @@ export const ttsVoices = (): string[] => (nat()?.ttsVoices?.() || '').split(',')
 export const neuralTtsStatus = (): string => nat()?.neuralTtsStatus?.() ?? 'not available'
 export const testVoice = (): void => nat()?.testVoice?.()
 export const setTtsVoice = (v: string): void => nat()?.setTtsVoice?.(v)
+/** The thinking word Hermes shows in the chat ("Pondering…") for the island chip; at most one per 2 s, short single words only. */
+let lastWord = ''
+let lastWordAt = 0
+export const reportStatusWord = (text: string): void => {
+  const t = text.replace(/\s+/g, ' ').trim()
+  const now = Date.now()
+  if (!t || t.length > 40 || t === lastWord || now - lastWordAt < 2000) return
+  lastWord = t
+  lastWordAt = now
+  try {
+    nat()?.pageStatus?.(t)
+  } catch {
+    /* older shell */
+  }
+}
 /** Tells the phone side that this chat is working (for the island and status), repeated while it lasts. */
 let workBeat: ReturnType<typeof setInterval> | undefined
 export const reportWorking = (working: boolean): void => {

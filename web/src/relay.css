@@ -1,0 +1,310 @@
+/* "Relay" look: graphite base, periwinkle accent, navy cards, mono labels, pill buttons.
+   Layout and colour ideas from Hermes Relay (github.com/Codename-11/hermes-relay, MIT). Colours and shapes only:
+   this app keeps its own bridge and connection. Loaded after theme.css; applies to the Material style
+   (Default / OLED / Light) so Neo and Glass stay as they were. */
+
+:root[data-style='material'] {
+  --radius: 16px;
+  --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+/* dark (default) */
+:root[data-style='material'][data-theme='default'] {
+  --bg: #08090d;
+  --surface: #121426;
+  --surface-2: #191b31;
+  --border: rgba(247, 246, 240, 0.14);
+  --text: #f3f2f7;
+  --dim: #a7a4b7;
+  --accent: #aebfff;
+  --accent-2: #8c5cff;
+  --accent-ink: #0b0c12;
+  --ok: #58d36f;
+  --warn: #f2b14b;
+  --err: #ff6b78;
+  --user: #aebfff;
+  --user-border: #aebfff;
+  --switch-on: #4f5bd5;
+  --code-bg: #05060a;
+  --warn-bg: #2a2112;
+  --warn-border: #5a4a1e;
+  --err-border: #5a2a33;
+  --mark-bg: #3b3a66;
+}
+/* OLED: same colours on pure black */
+:root[data-style='material'][data-theme='oled'] {
+  --bg: #000000;
+  --surface: #0b0c12;
+  --surface-2: #121426;
+  --border: rgba(247, 246, 240, 0.14);
+  --text: #f3f2f7;
+  --dim: #a7a4b7;
+  --accent: #aebfff;
+  --accent-2: #8c5cff;
+  --accent-ink: #0b0c12;
+  --ok: #58d36f;
+  --warn: #f2b14b;
+  --err: #ff6b78;
+  --user: #aebfff;
+  --user-border: #aebfff;
+  --switch-on: #4f5bd5;
+  --code-bg: #05060a;
+  --mark-bg: #3b3a66;
+}
+:root[data-style='material'][data-theme='light'] {
+  --bg: #f6f4fb;
+  --surface: #ffffff;
+  --surface-2: #ece9f4;
+  --border: rgba(23, 24, 38, 0.14);
+  --text: #171826;
+  --dim: #5a576c;
+  --accent: #3d4bc9;
+  --accent-2: #6a3fe0;
+  --accent-ink: #ffffff;
+  --ok: #2e9e48;
+  --warn: #b5791e;
+  --err: #c7283a;
+  --user: #3d4bc9;
+  --user-border: #3d4bc9;
+  --switch-on: #aebfff;
+  --code-bg: #f0eef7;
+  --mark-bg: #d9d5f5;
+}
+
+/* ── top bar: menu, avatar with online dot, name + model, tool buttons ── */
+:root[data-style='material'] .topbar {
+  border-bottom: 0;
+  padding: 10px 12px 6px;
+  gap: 8px;
+}
+:root[data-style='material'] .topbar .title {
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+:root[data-style='material'] .topbar .subtitle {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--dim);
+}
+:root[data-style='material'] .topbar .icon-btn {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+:root[data-style='material'] .topbar .icon-btn.menu-btn {
+  border-color: transparent;
+}
+.relay-avatar {
+  position: relative;
+  flex: none;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--surface-2);
+  color: var(--accent);
+  font-size: 1.15rem;
+  border: 1px solid var(--border);
+}
+.relay-dot {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--bg);
+  background: var(--dim);
+}
+.relay-dot.ok { background: var(--ok); }
+.relay-dot.warn { background: var(--warn); }
+.relay-dot.err { background: var(--err); }
+.relay-dot.wait { background: var(--dim); }
+
+/* ── context bar under the header ── */
+.ctx-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 16px 8px;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--dim);
+}
+.ctx-bar .track {
+  flex: 1;
+  height: 5px;
+  border-radius: 99px;
+  background: var(--border);
+  overflow: hidden;
+}
+.ctx-bar .track span {
+  display: block;
+  height: 100%;
+  border-radius: 99px;
+  background: var(--ok);
+}
+.ctx-bar .track span.hot {
+  background: var(--warn);
+}
+.ctx-bar .track span.full {
+  background: var(--err);
+}
+
+/* ── messages: navy cards for Hermes, periwinkle for you ── */
+:root[data-style='material'] .msg.user .bubble {
+  background: var(--user);
+  color: var(--accent-ink);
+  border-color: transparent;
+  border-radius: 20px 20px 6px 20px;
+}
+:root[data-theme='light'][data-style='material'] .msg.user .bubble {
+  color: #fff;
+}
+:root[data-style='material'] .msg.assistant {
+  background: var(--surface);
+  border-radius: 6px 20px 20px 20px;
+  padding: 10px 14px;
+}
+:root[data-style='material'] .msg-meta,
+:root[data-style='material'] .msg-time {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--dim);
+}
+:root[data-style='material'] pre,
+:root[data-style='material'] .codeblock {
+  border-radius: 14px;
+  border: 1px solid var(--border);
+}
+
+/* ── composer: one rounded card ── */
+:root[data-style='material'] .composer {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 26px;
+}
+:root[data-style='material'] .model-chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+:root[data-style='material'] .send:not(.mic):not(.live-btn):not(.stop) {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* bottom status pill (gateway, profile, model) */
+.relay-pill {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 14px calc(8px + env(safe-area-inset-bottom, 0px));
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.relay-pill .ok {
+  color: var(--ok);
+}
+.relay-pill .err {
+  color: var(--err);
+}
+.relay-pill .warn {
+  color: var(--warn);
+}
+.relay-pill .sep {
+  opacity: 0.5;
+}
+.relay-pill .rest {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── sessions drawer ── */
+:root[data-style='material'] .drawer {
+  background: var(--bg);
+  border-right: 0;
+  border-radius: 0 28px 28px 0;
+}
+:root[data-style='material'] .session-row {
+  border-radius: 0;
+}
+:root[data-style='material'] .session-row.active,
+:root[data-style='material'] .session-row[aria-current='true'] {
+  background: var(--surface-2);
+}
+:root[data-style='material'] .chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-family: var(--mono);
+}
+:root[data-style='material'] .chip.on,
+:root[data-style='material'] .chip.active {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* ── buttons, cards, rows, tabs ── */
+:root[data-style='material'] .btn {
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+:root[data-style='material'] .btn.primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+}
+:root[data-style='material'] .set-card,
+:root[data-style='material'] .hub-card,
+:root[data-style='material'] .hub-stat,
+:root[data-style='material'] .nav-tile,
+:root[data-style='material'] .mem-entry,
+:root[data-style='material'] .project-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+}
+:root[data-style='material'] .hub-card .hub-title,
+:root[data-style='material'] .set-card h3 {
+  font-weight: 700;
+}
+:root[data-style='material'] .hub-stat b {
+  font-size: 1.5rem;
+}
+:root[data-style='material'] .hub-stat span,
+:root[data-style='material'] .hub-card .hub-sub {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--dim);
+}
+:root[data-style='material'] .hub-foot {
+  display: none; /* replaced by the bottom pill's data on the chat; the hub keeps its timing line */
+}
+:root[data-style='material'] .hub-foot.keep {
+  display: block;
+}
+:root[data-style='material'] .segmented {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+}
+:root[data-style='material'] .segmented button.on {
+  background: var(--surface-2);
+  color: var(--text);
+}
+:root[data-style='material'] .sheet {
+  background: var(--surface);
+  border-radius: 28px 28px 0 0;
+}
+:root[data-style='material'] .screen .topbar .title {
+  font-size: 1.3rem;
+}

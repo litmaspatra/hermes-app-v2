@@ -35,7 +35,7 @@ export function startActivityPolling(): void {
   if (timer) return
   void poll()
   // Every 3 s while the banner shows something (another chat working, the review after a reply), once right after
-  // the open chat's turn ends (its review starts then), every 9 s otherwise: the open chat's own turn is not in
+  // the open chat's turn ends (its review starts then), once a minute otherwise: the open chat's own turn is not in
   // the banner, and each poll also wakes Hermes's dashboard (battery).
   let tick = 0
   let wasRunning = false
@@ -45,7 +45,8 @@ export function startActivityPolling(): void {
     const running = Boolean(s.active?.running)
     const ended = wasRunning && !running
     wasRunning = running
-    if (bannerVisible(s.activity, s.active?.storedId, running) || ended || tick % 3 === 0) void poll()
+    // Idle: once a minute (20 ticks of 3 s); poll() itself skips while the page is hidden.
+    if (bannerVisible(s.activity, s.active?.storedId, running) || ended || tick % 20 === 0) void poll()
   }, 3000)
   document.addEventListener('visibilitychange', () => void poll())
 }

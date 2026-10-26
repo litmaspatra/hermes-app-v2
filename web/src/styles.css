@@ -2823,6 +2823,46 @@ button.set-row:active, .set-row[role='presentation']:active { background: var(--
   font-size: 1.4rem;
 }
 
+.hub-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.stat-row {
+  padding: 12px 14px 0;
+}
+.hub-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  min-width: 0;
+}
+.hub-stat b {
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+.hub-stat b.ok,
+.hub-foot .ok {
+  color: var(--ok);
+}
+.hub-stat span {
+  color: var(--dim);
+  font-size: 0.75rem;
+}
+.hub-foot {
+  margin-top: 4px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--dim);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
 /* Canvas: Hermes writing a document (canvas.ts `writing`) */
 .canvas-writing {
   flex: 1;

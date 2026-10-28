@@ -249,7 +249,7 @@ public class ShareDropActivity extends Activity {
             if (s.length() > 0) s.append("\n");
             s.append(sharedText.length() > 90 ? sharedText.substring(0, 90) + "…" : sharedText);
         }
-        if (s.length() == 0) s.append("Nothing to read in what was shared.");
+        if (s.length() == 0) s.append("Ask Hermes anything, or share a file, an image or some text to it.");
         info.setText(s);
         if (bmp != null) {
             thumb.setImageBitmap(bmp);
@@ -269,10 +269,6 @@ public class ShareDropActivity extends Activity {
         }
         if (!ready) {
             Toast.makeText(this, "One moment, still reading it", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (copied.isEmpty() && sharedText.isEmpty()) {
-            Toast.makeText(this, "Nothing to send", Toast.LENGTH_SHORT).show();
             return;
         }
         String prompt = sharedText.isEmpty() ? typed : typed + "\n\n" + sharedText;

@@ -621,10 +621,21 @@ public class HermesService extends Service {
                         .setProgressSegments(java.util.List.of(new Notification.ProgressStyle.Segment(100).setColor(GOLD))));
                 b.setContentText(codeSpans(text));
             }
-            promote(b, petChip());
+            promote(b, chipText());
         }
         b.setLargeIcon(petIcon());
         return b.build();
+    }
+
+    /** The text on the small (collapsed) system island: Hermes' own thinking word while it thinks, else the pet's symbol. */
+    String chipText() {
+        if (lastWorking && !aiWord.isEmpty() && System.currentTimeMillis() - aiWordAt < 30_000) {
+            String w = aiWord.endsWith("…") ? aiWord.substring(0, aiWord.length() - 1) : aiWord;
+            int sp = w.indexOf(' ');
+            if (sp > 0) w = w.substring(0, sp); // "Initializing agent" → "Initializing"
+            return w.length() > 12 ? w.substring(0, 11) + "…" : w;
+        }
+        return petChip();
     }
 
     static final int GOLD = Color.parseColor("#D9A441"), GREEN = Color.parseColor("#3DBE7A"),
@@ -809,7 +820,7 @@ public class HermesService extends Service {
         if (a.optBoolean("allow_session", true))
             b.addAction(new Notification.Action.Builder(null, colored("Allow session", GOLD), approveIntent(a, "session")).build());
         b.addAction(new Notification.Action.Builder(null, colored("✕ Deny", RED), approveIntent(a, "deny")).build());
-        promote(b, secs > 0 ? petEmoji() + " " + secs + "s" : petEmoji() + "❗");
+        promote(b, "Approve");
         b.setLargeIcon(petIcon());
         return b.build();
     }

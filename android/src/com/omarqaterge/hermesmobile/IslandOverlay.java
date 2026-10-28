@@ -12,6 +12,7 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PixelFormat;
+import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
@@ -467,6 +468,7 @@ final class IslandOverlay {
         lastPref = pp;
         place(moved || peekChanged);
         applyTheme(full, peek);
+        if (peekChanged || (peek && pet.getClipBounds() == null)) peekLook(peek);
 
         boolean approving = state.approval != null;
         Mood m = listening ? Mood.LISTEN : dragging ? Mood.DROP : state.mood;
@@ -529,7 +531,7 @@ final class IslandOverlay {
     /** How see-through the island is: a resting (peeking) pet is faint; a working one follows the Glass setting;
      *  anything that needs a tap or a read (approval, drop prompt, voice, a note) is solid. */
     private float targetAlpha(boolean full, boolean peek) {
-        if (peek) return 0.55f;
+        if (peek) return 0.9f;
         if (!full || panelOpen || dragging || listening || state.approval != null || noteUntil > SystemClock.uptimeMillis()) return 1f;
         String g = svc.getSharedPreferences("hm", Context.MODE_PRIVATE).getString("island_glass", "off");
         return "strong".equals(g) ? 0.45f : "soft".equals(g) ? 0.72f : 1f;
@@ -744,12 +746,30 @@ final class IslandOverlay {
     private int[] peekXY(int w) {
         DisplayMetrics dm = svc.getResources().getDisplayMetrics();
         String pref = posPref();
-        boolean left = "tl".equals(pref) || "ml".equals(pref)
-                || ("free".equals(pref) && svc.getSharedPreferences("hm", Context.MODE_PRIVATE).getFloat("pet_fx", 0.5f) < 0.5f)
-                || ("wander".equals(pref) && ("tl".equals(curAnchor) || "ml".equals(curAnchor)));
-        int show = dp(22);
+        boolean left = peekLeft();
+        int show = (int) (w * 0.66f); // most of the head shows, the rest is behind the edge
         int y = "free".equals(pref) ? freeXY(w)[1] : anchorXY(left ? "ml" : "mr", w)[1];
         return new int[] {left ? show - w : dm.widthPixels - show, y};
+    }
+
+    private boolean peekLeft() {
+        String pref = posPref();
+        return "tl".equals(pref) || "ml".equals(pref)
+                || ("free".equals(pref) && svc.getSharedPreferences("hm", Context.MODE_PRIVATE).getFloat("pet_fx", 0.5f) < 0.5f)
+                || ("wander".equals(pref) && ("tl".equals(curAnchor) || "ml".equals(curAnchor)));
+    }
+
+    /** Peeking = only the head, leaning out from behind the screen edge (not a pet cut in half). */
+    private void peekLook(boolean peek) {
+        if (peek) {
+            pet.setClipBounds(new Rect(0, 0, dp(54), dp(36)));
+            pet.setPivotX(dp(27));
+            pet.setPivotY(dp(36));
+            pet.setRotation(peekLeft() ? 16f : -16f);
+        } else {
+            pet.setClipBounds(null);
+            pet.setRotation(0f);
+        }
     }
 
     /** Every 20–40 s, if the pet is just hanging around, it strolls to another spot. */

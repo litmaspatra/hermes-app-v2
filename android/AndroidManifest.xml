@@ -70,6 +70,7 @@
                 <data android:mimeType="text/*" />
                 <data android:mimeType="application/pdf" />
                 <data android:mimeType="application/*" />
+                <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
         <activity
@@ -89,13 +90,6 @@
                 <action android:name="android.intent.action.ASSIST" />
                 <action android:name="android.intent.action.VOICE_COMMAND" />
                 <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-            <!-- "Share to Hermes": text, links, photos, PDFs and other files from any app. -->
-            <intent-filter>
-                <action android:name="android.intent.action.SEND" />
-                <action android:name="android.intent.action.SEND_MULTIPLE" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
         <!-- Experiment (P6): a second, narrower "Share to Hermes" entry named "Ask Hermes", so phone skins that list

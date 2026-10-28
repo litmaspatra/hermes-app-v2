@@ -127,7 +127,7 @@ export function IslandPage() {
     <>
       <Section
         title="Which island"
-        footer="Use one island, not both. System island: drawn by the phone itself (OriginOS, HyperOS, Android 16). It shows Hermes' own status words (pondering, deliberating…), a progress bar and the approval buttons, and Hermes appears in the phone's drag tray. Floating pet: Hermes' own animated pet that sits on top of other apps; it needs “Display over other apps”."
+        footer="Use one island, not both. System island: drawn by the phone itself (OriginOS, HyperOS, Android 16). It shows Hermes' own status words (pondering, deliberating…) on the small island and the expanded card, and Allow / Deny buttons when Hermes asks for approval. Floating pet: Hermes' own animated pet that sits on top of other apps; it needs “Display over other apps”."
       >
         <Segmented
           options={[{ value: 'system' as const, label: 'System island' }, { value: 'app' as const, label: 'Floating pet' }]}
@@ -140,7 +140,7 @@ export function IslandPage() {
       {!app && (
         <Section
           title="Drag and drop"
-          footer="Drag an image, file, text or link from another app, then drop it on “Ask Hermes” in the phone's drag tray (or use Share → Ask Hermes). A small window opens where you say what Hermes should do. If Ask Hermes is not in the tray yet, share something to it once from the share sheet; phones rank the tray by use."
+          footer="Share or drag an image, file, text or link to “Ask Hermes”: a small window opens where you say what Hermes should do, and Hermes works in the background. The phone's own drag tray decides which apps it lists (it favours recently used ones), so use Share → Ask Hermes a few times; long-press the Hermes icon for an Ask Hermes shortcut too."
         >
           <Row icon="🖼" tone="blue" title="Ask Hermes" sub="Opens a small window; Hermes works in the background" />
         </Section>
@@ -148,7 +148,7 @@ export function IslandPage() {
       {app && (
         <>
           <PetGallery initial={s.pet.startsWith('ap-') ? s.pet.slice(3) : ''} />
-          <Section title="When to show it" footer="Peek at the edge: the pet rests at the side of the screen with just a sliver showing, comes out when Hermes works or you drag something, and goes back after a few seconds. On demand: hidden while idle (a tiny invisible strip stays so a drag has somewhere to land). Always: the pet stays out.">
+          <Section title="When to show it" footer="Peek at the edge: the pet's head leans out from behind the side of the screen, comes out when Hermes works or you drag something, and goes back after a few seconds. Tap the head to bring her out. On demand: hidden while idle (a tiny invisible strip stays so a drag has somewhere to land). Always: the pet stays out.">
             <Segmented
               options={[{ value: 'peek' as const, label: 'Peek at edge' }, { value: 'ondemand' as const, label: 'On demand' }, { value: 'always' as const, label: 'Always' }]}
               value={s.island_mode}

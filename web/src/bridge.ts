@@ -102,16 +102,35 @@ const tokenWaits = new Map<number, (t: string) => void>()
   tokenWaits.delete(id)
 }
 
+// Last-known-good token cache: memory-only, keyed by server identity (baseUrl()).
+// Preserves the most recently confirmed valid token so a transient scrape failure
+// (Hermes still booting, HTTP timeout) does not cut the connection immediately.
+// Cleared by invalidateTokenCache() on auth rejection (4401/4403) or URL change.
+const _lastGoodToken = new Map<string, string>()
+let _lastTokenBase = ''
+
+/** Clears the last-known-good token for the current server (call on 4401/4403 auth rejection). */
+export function invalidateTokenCache(): void {
+  const base = baseUrl()
+  _lastGoodToken.delete(base)
+}
+
 function nativeToken(): Promise<string> {
   if (!native?.getTokenAsync) return Promise.resolve(fetchToken())
   const id = ++tokenSeq
   return new Promise(resolve => {
     const timer = setTimeout(() => {
       tokenWaits.delete(id)
-      resolve('')
+      // On timeout: return the last-known-good token for this server, not empty string.
+      // An empty resolve here would cause wsUrl() to return null and abort the connect
+      // even though the native side may simply be slow (Hermes still booting).
+      const fallback = _lastGoodToken.get(baseUrl()) ?? ''
+      resolve(fallback)
     }, 15_000)
     tokenWaits.set(id, t => {
       clearTimeout(timer)
+      // A fresh non-empty token replaces the cache immediately.
+      if (t) _lastGoodToken.set(baseUrl(), t)
       resolve(t)
     })
     native.getTokenAsync!(id)
@@ -121,17 +140,45 @@ function nativeToken(): Promise<string> {
 /** Fresh WebSocket URL for every connect: the dashboard mints a new session token
  * whenever Hermes restarts, so a cached token would lock us out after a restart. */
 export async function wsUrl(): Promise<string | null> {
+  const currentBase = baseUrl()
+  // Clear the last-known-good cache when the server URL changes (different identity).
+  if (currentBase !== _lastTokenBase) {
+    if (_lastTokenBase) _lastGoodToken.delete(_lastTokenBase)
+    _lastTokenBase = currentBase
+  }
+
   let token = native ? await nativeToken() : fetchToken()
   if (!native) {
     try {
       const r = await fetch('/__token', { cache: 'no-store' })
-      if (r.ok) token = ((await r.json()) as { token?: string }).token || token
+      if (r.ok) {
+        const fresh = ((await r.json()) as { token?: string }).token
+        if (fresh) {
+          // Web fallback: memory-only, scoped to current server identity.
+          // Tried once per connect; never written to disk/sessionStorage.
+          token = fresh
+          _lastGoodToken.set(currentBase, fresh)
+        } else {
+          token = token || _lastGoodToken.get(currentBase) || ''
+        }
+      } else {
+        token = token || _lastGoodToken.get(currentBase) || ''
+      }
     } catch {
-      /* static hosting: keep sessionStorage value */
+      /* static hosting or network error: use last-known-good as fallback */
+      token = token || _lastGoodToken.get(currentBase) || ''
     }
+  } else if (!token) {
+    // Native path: nativeToken() already returns last-known-good on timeout,
+    // but if it returned empty (no cache yet), we have nothing to fall back to.
+    token = _lastGoodToken.get(currentBase) ?? ''
   }
+
+  // Update last-known-good if we got a fresh token.
+  if (token) _lastGoodToken.set(currentBase, token)
+
   if (!token) return null
-  return `${baseUrl().replace(/^http/, 'ws')}/api/ws?token=${encodeURIComponent(token)}`
+  return `${currentBase.replace(/^http/, 'ws')}/api/ws?token=${encodeURIComponent(token)}`
 }
 
 export function startHermes(): void {

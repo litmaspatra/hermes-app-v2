@@ -639,6 +639,84 @@ def cached(key: str, fn, ok_ttl: float = 600.0, bad_ttl: float = 20.0):
 
 _svc: dict[str, dict] = {}
 
+# ── port/PID change tracking ────────────────────────────────────────────────
+# Tracks the last-known listener PID for each monitored TCP port.
+# On every supervisor tick we compare the current listener to the recorded one;
+# any change is written to services.log so unusual port hand-offs (a second
+# FastBrain process grabbing 8765, dashboard restart on 9119, etc.) are visible.
+# We do NOT kill processes or treat a new listener as evidence of a duplicate —
+# we only log the change so the operator can investigate.
+_port_pid_last: dict[int, int | None] = {}
+
+MONITORED_PORTS = (FB_PORT, TTS_PORT, CONTROL_PORT, 9119)
+
+
+def _listener_pid(port: int) -> int | None:
+    """Return the PID of the process listening on TCP 127.0.0.1:<port>, or None.
+    Uses /proc/net/tcp (IPv4 only; sufficient for loopback). Does not shell out."""
+    try:
+        # /proc/net/tcp columns: sl local_address rem_address st tx:rx uid inode …
+        # local_address is hex "0100007F:hex_port" for 127.0.0.1 (little-endian).
+        hex_port = f"{port:04X}"
+        target = f"0100007F:{hex_port}"
+        listening_inodes: set[int] = set()
+        with open("/proc/net/tcp") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) < 10:
+                    continue
+                if parts[1] == target and parts[3] == "0A":  # 0A = LISTEN
+                    try:
+                        listening_inodes.add(int(parts[9]))
+                    except ValueError:
+                        pass
+        if not listening_inodes:
+            return None
+        # Walk /proc/*/fd to find which process owns an inode in the listen set.
+        for pid_str in os.listdir("/proc"):
+            if not pid_str.isdigit():
+                continue
+            try:
+                fd_dir = f"/proc/{pid_str}/fd"
+                for fd in os.listdir(fd_dir):
+                    try:
+                        target_link = os.readlink(f"{fd_dir}/{fd}")
+                        # Links look like "socket:[1234567]"
+                        if target_link.startswith("socket:["):
+                            inode = int(target_link[8:-1])
+                            if inode in listening_inodes:
+                                return int(pid_str)
+                    except (OSError, ValueError):
+                        pass
+            except OSError:
+                pass
+        return None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _log_port_changes() -> None:
+    """Check monitored ports for listener PID changes and log any differences.
+    Called once per supervisor tick — O(n·procs) but fast enough at 20 s intervals."""
+    for port in MONITORED_PORTS:
+        try:
+            pid = _listener_pid(port)
+            prev = _port_pid_last.get(port, -1)  # -1 = never checked
+            if prev == -1:
+                # First check: record baseline without logging (normal startup noise).
+                _port_pid_last[port] = pid
+                continue
+            if pid != prev:
+                if pid is None:
+                    _log(f"port {port}: listener gone (was pid {prev})")
+                elif prev is None:
+                    _log(f"port {port}: new listener pid {pid}")
+                else:
+                    _log(f"port {port}: listener changed pid {prev} → {pid}")
+                _port_pid_last[port] = pid
+        except Exception:  # noqa: BLE001
+            pass
+
 
 def _note_start(name: str, err: str = "") -> None:
     s = _svc.setdefault(name, {"starts": 0, "last_start": 0.0, "error": ""})
@@ -648,9 +726,26 @@ def _note_start(name: str, err: str = "") -> None:
     _log(f"start {name}" + (f": {err}" if err else ""))
 
 
+def tts_up() -> bool:
+    """The TTS server is genuinely ready: the port accepts connections AND /health returns 200.
+    The FastBrain bridge (port 8765) speaks a proprietary binary protocol with no confirmed
+    HTTP health path, so port_open() remains correct for that service. The TTS server is
+    written by this module (TTS_SERVER_SRC) and is known to expose /health, so we check it.
+    Falls back to port_open() if the HTTP check times out, to avoid a false "down" during
+    the ~1 s startup window before the HTTP listener is ready."""
+    if not port_open(TTS_PORT):
+        return False
+    code = http_code(TTS_PORT, "/health")
+    # code 0 = connection refused or timeout (still starting); treat as port_open truth
+    return code == 200 or code == 0
+
+
 def service_states() -> dict:
-    """Cheap per-service health (port and socket checks only): up, starting (started in the last 60 s) or down."""
-    probes = {"router": router_up, "bridge": lambda: port_open(FB_PORT), "tts": lambda: port_open(TTS_PORT)}
+    """Per-service health: up, starting (started in the last 60 s) or down.
+    TTS uses a real HTTP /health check (the server exposes one); bridge uses TCP connect-close
+    (proprietary binary protocol, no confirmed health endpoint); router uses its Unix-socket
+    HTTP check; MiniLM uses its two-tier socket+pid check."""
+    probes = {"router": router_up, "bridge": lambda: port_open(FB_PORT), "tts": tts_up}
     if minilm_enabled():
         probes["minilm"] = minilm_up
     out = {}
@@ -751,6 +846,7 @@ def _supervise_loop() -> None:
                 if not port_open(CONTROL_PORT) and "control" not in _children_threads:
                     _start_control()
                 ensure()
+                _log_port_changes()  # log any listener PID changes for 8765/8766/8767/9119
                 if time.time() - _last_import > 1800:
                     _last_import = time.time()
                     threading.Thread(target=import_hindsight_aliases, daemon=True).start()

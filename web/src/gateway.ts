@@ -23,7 +23,7 @@ import type {
   TranscriptMessage,
   Usage
 } from '@hermes/shared/gateway-contract.generated'
-import { appInBackground, approvalAnswered, cancelNotification, reportWorking, notify, setLastChat, startHermes, wsUrl } from './bridge'
+import { appInBackground, approvalAnswered, cancelNotification, invalidateTokenCache, reportWorking, notify, setLastChat, startHermes, wsUrl } from './bridge'
 import {
   type ActiveSession,
   type Attachment,
@@ -40,7 +40,20 @@ import {
 } from './store'
 
 // The client's own heartbeat is off (interval 0): see "liveness" below.
-export const client = new JsonRpcGatewayClient({ requestTimeoutMs: 120_000, heartbeatIntervalMs: 0 })
+export const client = new JsonRpcGatewayClient({
+  requestTimeoutMs: 120_000,
+  heartbeatIntervalMs: 0,
+  // On explicit auth rejection (4401 = bad token, 4403 = forbidden) clear the
+  // last-known-good token so the next connect fetches a fresh one instead of
+  // replaying a rejected credential. Returning true tells the gateway client
+  // to handle the close normally (drop socket, move to closed state).
+  onSocketClose: (event: { code: number }) => {
+    if (event.code === 4401 || event.code === 4403) {
+      invalidateTokenCache()
+    }
+    return false // let default close handling proceed
+  },
+})
 
 const SERVER_REQUESTS = new Set(['approval', 'clarify', 'secret', 'sudo', 'otp', 'connection.request'])
 
@@ -89,7 +102,12 @@ export async function connect(): Promise<void> {
     await client.connect(url)
     await afterConnect()
   } catch (err) {
-    setState({ connDetail: err instanceof Error ? err.message : String(err) })
+    const msg = err instanceof Error ? err.message : String(err)
+    // Auth rejection during the handshake (e.g. "closed during handshake: code 4401"):
+    // the onSocketClose hook handles the live-socket path; this catches the handshake
+    // path where the socket closes before `open` fires.
+    if (/440[13]/.test(msg)) invalidateTokenCache()
+    setState({ connDetail: msg })
     scheduleReconnect()
   }
 }
@@ -120,25 +138,101 @@ export async function connectionAlive(): Promise<boolean> {
 // the app is hidden Chromium freezes the page (~1 min in), so on return the first late tick saw a minute of
 // "silence" and closed a healthy socket: "offline", a reconnect, and a reload of the chat mid-turn. This one gives
 // the socket a fresh window after a frozen gap, and pings as soon as the page is shown again.
+//
+// Unstable state (Area 1): on 45 s silence the connection enters a visible "unstable" intermediate state
+// rather than immediately closing. A single probe runs at a time; overlapping probes are suppressed.
+// Only a real response restores healthy. The recovery window is bounded to ~120 s (RECOVERY_MS), chosen
+// to be safely above the 108 s stall observed in logs while staying well below a user-visible freeze.
+// After recovery expiry the socket is invalidated and normal reconnect takes over. Explicit closures,
+// auth rejection, and cancellation are unaffected — they remain prompt.
 const BEAT_MS = 15_000
 const DEADLINE_MS = 45_000
+// Time before an unstable probe is fired (must be > 0 so the caller sees the unstable state first).
+const PROBE_MS = 3_000
+// Maximum wall time in the unstable state before we give up and close the socket.
+const RECOVERY_MS = 120_000
 let aliveAt = Date.now()
 let lastBeat = Date.now()
+let unstableSince = 0   // 0 = healthy; >0 = timestamp when we entered unstable
+let probing = false     // true while one gateway.ping is in-flight
 
 client.onAny(() => {
   aliveAt = Date.now()
+  if (unstableSince) {
+    // A real inbound frame — restored from unstable.
+    unstableSince = 0
+    probing = false
+    setState({ conn: 'open', connDetail: '' })
+  }
 })
 
 setInterval(() => {
   const now = Date.now()
   const slept = now - lastBeat > BEAT_MS * 2
   lastBeat = now
-  if (getState().conn !== 'open') return
-  if (slept) aliveAt = now
-  else if (now - aliveAt >= DEADLINE_MS) {
-    client.invalidate('WebSocket heartbeat timed out')
+  if (getState().conn !== 'open' && !unstableSince) return
+  if (slept) {
+    // Woke from sleep: give the socket a fresh window; treat the gap as alive.
+    aliveAt = now
+    unstableSince = 0
+    probing = false
     return
   }
+
+  const silent = now - aliveAt >= DEADLINE_MS
+
+  if (unstableSince) {
+    // Already in unstable state — enforce the recovery window ceiling.
+    if (now - unstableSince >= RECOVERY_MS) {
+      unstableSince = 0
+      probing = false
+      client.invalidate('Connection unstable: recovery window expired')
+      return
+    }
+    // One probe at a time; wait for it to resolve before firing another.
+    if (!probing) {
+      probing = true
+      rpc('gateway.ping', {}, PROBE_MS).then(
+        () => {
+          aliveAt = Date.now()
+          unstableSince = 0
+          probing = false
+          setState({ conn: 'open', connDetail: '' })
+        },
+        () => {
+          probing = false
+          // Probe failed; remain unstable. Next tick will retry or expire.
+        }
+      )
+    }
+    return
+  }
+
+  if (silent) {
+    // First time we notice silence: enter unstable state. Do NOT close the socket yet.
+    unstableSince = now
+    probing = false
+    setState({ connDetail: 'Connection unstable, checking…' })
+    // Fire the first probe after a short delay so the UI state update renders first.
+    setTimeout(() => {
+      if (!unstableSince || probing) return
+      probing = true
+      rpc('gateway.ping', {}, PROBE_MS).then(
+        () => {
+          aliveAt = Date.now()
+          unstableSince = 0
+          probing = false
+          setState({ conn: 'open', connDetail: '' })
+        },
+        () => {
+          probing = false
+        }
+      )
+    }, 200)
+    return
+  }
+
+  // Healthy: send a routine keep-alive ping.
   rpc('gateway.ping', {}, DEADLINE_MS).then(
     () => (aliveAt = Date.now()),
     () => {}
@@ -147,11 +241,20 @@ setInterval(() => {
 
 /** Back in front: a socket that died while the page was frozen is replaced now, not after the deadline. */
 async function checkSocket(): Promise<void> {
-  if (getState().conn !== 'open') return
+  if (getState().conn !== 'open' && !unstableSince) return
   try {
     await rpc('gateway.ping', {}, 10_000)
+    if (unstableSince) {
+      unstableSince = 0
+      probing = false
+      setState({ conn: 'open', connDetail: '' })
+    }
   } catch {
-    if (getState().conn === 'open') client.invalidate('WebSocket closed')
+    if (getState().conn === 'open' || unstableSince) {
+      unstableSince = 0
+      probing = false
+      client.invalidate('WebSocket closed')
+    }
   }
 }
 

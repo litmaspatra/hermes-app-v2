@@ -115,11 +115,25 @@ def lang(v: str) -> str:
     return {"a": "en-us", "b": "en-gb", "h": "hi"}.get(v[:1], "en-us")
 
 
+_kload = threading.Lock()
+
+
 def kokoro():
     global _k
     if _k is None:
-        from kokoro_onnx import Kokoro
-        _k = Kokoro(str(MODEL), str(VOICES))
+        with _kload:  # one load, even when a request and the background warm-up arrive together
+            if _k is None:
+                from kokoro_onnx import Kokoro
+                try:  # an explicit thread count: measured ~12% faster than the default on this phone (6 and 8 threads are slower)
+                    import onnxruntime as ort
+                    so = ort.SessionOptions()
+                    so.intra_op_num_threads = int(os.environ.get("HM_TTS_THREADS", "4"))
+                    sess = ort.InferenceSession(str(MODEL), sess_options=so, providers=["CPUExecutionProvider"])
+                    k = Kokoro.from_session(sess, str(VOICES))
+                except Exception as e:  # older kokoro-onnx without from_session, or anything unexpected: the default way
+                    print("kokoro: default session:", type(e).__name__, e, flush=True)
+                    k = Kokoro(str(MODEL), str(VOICES))
+                _k = k
     return _k
 
 
@@ -140,7 +154,7 @@ def names() -> list:
     out = []
     if kokoro_ready():
         try:
-            have = set(kokoro().get_voices())
+            have = set(_k.get_voices()) if _k is not None else set(WANTED)  # listing voices must not load the model
             out += ["kokoro-" + v for v in WANTED if v in have]
         except Exception:
             pass
@@ -250,14 +264,25 @@ def main() -> int:
     p.add_argument("--port", type=int, default=8766)
     p.add_argument("--key-file", default=os.environ.get("HERMES_MOBILE_KEY_FILE", "/data/data/com.termux/files/home/.hermes-mobile/key"))
     a = p.parse_args()
-    srv = ThreadingHTTPServer(("127.0.0.1", a.port), make_handler(Path(a.key_file)))
+    try:
+        srv = ThreadingHTTPServer(("127.0.0.1", a.port), make_handler(Path(a.key_file)))
+    except OSError as e:  # another voice server already holds the port: leave it alone, do not load a second model
+        print(f"port {a.port} is taken ({e}); a voice server is already running", flush=True)
+        return 0
     srv.daemon_threads = True
     if kokoro_ready():
-        try:  # load now and say hello once, so the first real sentence isn't the slow one
-            with _lock:
-                synth(DEFAULT, "Ready.", 1.0)
-        except Exception as e:
-            print("kokoro warm-up failed:", type(e).__name__, e, flush=True)
+        def warm() -> None:
+            # the first calls on a fresh process run at half speed; do them now, in the background (a request that
+            # arrives meanwhile waits for the lock), so the first real sentence isn't the slow one
+            for w in ("Ready.", "Hello. This is a short warm up sentence.",
+                      "I looked at your calendar for tomorrow. You are free in the morning, and busy after lunch."):
+                try:
+                    with _lock:
+                        synth(DEFAULT, w, 1.0)
+                except Exception as e:
+                    print("kokoro warm-up failed:", type(e).__name__, e, flush=True)
+                    return
+        threading.Thread(target=warm, daemon=True).start()
     print(f"voice server on 127.0.0.1:{a.port}, voices: {names()}", flush=True)
     srv.serve_forever()
     return 0
@@ -335,19 +360,55 @@ def run(cmd: list[str], timeout: float = 120, env: dict | None = None) -> tuple[
         return 127, f"{type(e).__name__}: {e}"
 
 
+_spawn_state: dict[str, dict] = {}
+
+
+def _alive_as(pid: int, marker: str) -> bool:
+    try:
+        return marker.encode() in Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return False
+
+
 def spawn(name: str, cmd: list[str], log: Path, env: dict | None = None) -> None:
-    """Start a long-running child detached from Hermes' terminal (own session), once."""
+    """Start a long-running child detached from Hermes' terminal (own session), once.
+    - Another supervisor process (the plugin, the app's helper, a Doctor fix) may already run it: its pid file says so.
+    - A child that dies within a minute is restarted only after 30 s, 60 s … (at most 2 min), and why it died is logged."""
+    marker = next((os.path.basename(a) for a in cmd[1:] if not a.startswith("-")), os.path.basename(cmd[0]))
+    pf = STATE_DIR / f"{name}.pid"
+    try:
+        if _alive_as(int(pf.read_text().strip()), marker):
+            return
+    except (OSError, ValueError):
+        pass
+    st = _spawn_state.setdefault(name, {"t": 0.0, "fails": 0, "next": 0.0})
     old = _children.get(name)
-    if old is not None and old.poll() is None:
+    if old is not None:
+        if old.poll() is None:
+            return
+        if st["t"]:
+            lived = time.time() - st["t"]
+            _log(f"{name} exited rc={old.returncode} after {lived:.0f}s")
+            st["fails"] = st["fails"] + 1 if lived < 60 else 0
+            st["next"] = time.time() + min(120, 30 * 2 ** (st["fails"] - 1)) if st["fails"] else 0.0
+            st["t"] = 0.0
+    if time.time() < st["next"]:
         return
     log.parent.mkdir(parents=True, exist_ok=True)
     f = open(log, "ab")
     _children[name] = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.STDOUT, start_new_session=True,
                                        env={**os.environ, **(env or {})})
+    st["t"] = time.time()
+    try:
+        pf.write_text(str(_children[name].pid))
+    except OSError:
+        pass
 
 
 def py_ok(py: str, code: str) -> bool:
-    return run([py, "-c", code], 25)[0] == 0
+    """True if `code` runs in `py`. A probe that only times out (a swapping, overloaded phone) counts as ok: a package
+    that is really missing fails at once, and calling a slow import "missing" made the helper reinstall working things."""
+    return run([py, "-c", code], 90)[0] in (0, 124)
 
 
 def pythons(*names: str) -> list[str]:
@@ -423,7 +484,7 @@ def write_tts_server() -> Path:
 def tts_voices() -> list[str]:
     try:
         req = urllib.request.Request(f"http://127.0.0.1:{TTS_PORT}/voices", headers={"X-Hermes-Mobile-Key": read_key()})
-        with urllib.request.urlopen(req, timeout=4) as r:
+        with urllib.request.urlopen(req, timeout=8) as r:
             return r.read().decode().split()
     except Exception:
         return []
@@ -459,114 +520,68 @@ def minilm_files_ok() -> bool:
 
 
 def _minilm_answers() -> bool:
-    """The MiniLM socket accepts a connection (the pid file can name a launcher that already exited)."""
-    s = FB_HOME / "minilm" / "minilm.sock"
-    if not s.exists():
-        return False
+    """The MiniLM socket accepts a connection."""
     try:
         c = socket.socket(socket.AF_UNIX)
         c.settimeout(1.0)
-        c.connect(str(s))
+        c.connect(str(FB_HOME / "minilm" / "minilm.sock"))
         c.close()
         return True
     except OSError:
         return False
 
 
-def minilm_up() -> bool:
-    """Up = its socket answers, or (as before) the socket file exists and the pid file names a live process."""
-    d = FB_HOME / "minilm"
-    return _minilm_answers() or ((d / "minilm.sock").exists() and (d / "minilm.pid").is_file() and _pid_alive(d / "minilm.pid"))
-
-
-_minilm_state: dict = {"fails": 0, "next": 0.0, "stops": [], "noted": 0.0}
-
-
 def _minilm_pid() -> int | None:
-    """The pid in minilm.pid if it is really the MiniLM service (never some other process that reused the number)."""
+    """The pid in minilm.pid if that process is alive and is the MiniLM service (never another process that reused the number)."""
     try:
         pid = int((FB_HOME / "minilm" / "minilm.pid").read_text().strip())
-        return pid if b"minilm-semantic-service" in Path(f"/proc/{pid}/cmdline").read_bytes() else None
     except (OSError, ValueError):
         return None
-
-
-def _minilm_facts(pid: int) -> str:
-    """What the system says about a MiniLM process whose socket is missing (goes to services.log, to find out why)."""
-    out = []
-    d = FB_HOME / "minilm"
     try:
-        out.append("dir=" + ",".join(sorted(x.name for x in d.iterdir())))
-    except OSError as e:
-        out.append(f"dir: {e}")
-    try:
-        out.append("proc_unix=" + ";".join(l.split()[-1] for l in Path(f"/proc/{pid}/net/unix").read_text().splitlines() if "minilm" in l)[:200])
-    except OSError as e:
-        out.append(f"proc_unix: {e}")
-    try:
-        out.append("fds=" + ",".join(os.readlink(f"/proc/{pid}/fd/{n}") for n in os.listdir(f"/proc/{pid}/fd"))[:300])
-    except OSError as e:
-        out.append(f"fds: {e}")
-    out.append(f"connect={'ok' if _minilm_answers() else 'fail'} realdir={os.path.realpath(d)}")
-    return " | ".join(out)
-
-
-def _minilm_stop(pid: int) -> None:
-    try:
-        os.kill(pid, signal.SIGTERM)
-        for _ in range(8):
-            time.sleep(0.5)
-            os.kill(pid, 0)  # raises once it is gone
-        os.kill(pid, signal.SIGKILL)
+        return pid if b"minilm-semantic-service" in Path(f"/proc/{pid}/cmdline").read_bytes() else None
     except OSError:
-        pass
-    for f in ("minilm.pid", "minilm.sock"):
         try:
-            (FB_HOME / "minilm" / f).unlink()
+            os.kill(pid, 0)  # cmdline not readable here: fall back to "is it alive"
+            return pid
         except OSError:
-            pass
+            return None
+
+
+def minilm_up() -> bool:
+    """Up = the service process is alive (the same test start-minilm uses), or its socket answers.
+    The socket FILE is deliberately not required: on some phones it is not visible by path although the service
+    is listening, and judging by it made the supervisor restart a healthy MiniLM every 20 s."""
+    return _minilm_pid() is not None or _minilm_answers()
+
+
+_minilm_state: dict = {"fails": 0, "next": 0.0, "noted": 0.0}
 
 
 def _minilm_tend() -> bool:
-    """Keep MiniLM running and never restart a healthy one. True if it started it.
-    - answering: nothing to do.
-    - process alive but no working socket for over a minute: log the facts, stop it and start it again
-      (at most 3 times an hour, so a cause that keeps deleting the socket cannot become a restart loop).
-    - not running: start it, wait up to 25 s for the socket, and back off (30 s, 60 s … 10 min) if it does not come."""
+    """Keep MiniLM running and never touch a healthy one. True if it started it.
+    A start waits up to 15 s and counts only if the process is still alive; failures back off (30 s, 60 s … 10 min)."""
     st, now = _minilm_state, time.time()
     if minilm_up():
         st["fails"] = 0
+        pid = _minilm_pid()
+        if pid is not None and not _minilm_answers() and now - st["noted"] > 3600:
+            st["noted"] = now  # evidence for later, once an hour: alive, but the socket cannot be reached by path
+            _log(f"minilm: process {pid} is alive; its socket does not answer from here ({(FB_HOME / 'minilm' / 'minilm.sock').exists()=})")
         return False
-    pid = _minilm_pid()
-    if pid is not None:
-        try:
-            age = now - (FB_HOME / "minilm" / "minilm.pid").stat().st_mtime
-        except OSError:
-            age = 0
-        if age < 60:
-            return False  # still loading the model
-        if now - st["noted"] > 600:
-            st["noted"] = now
-            _log(f"minilm: process {pid} runs but its socket does not answer: {_minilm_facts(pid)}")
-        st["stops"] = [t for t in st["stops"] if now - t < 3600]
-        if len(st["stops"]) >= 3:
-            return False
-        st["stops"].append(now)
-        _minilm_stop(pid)
     if now < st["next"]:
         return False
     rc, out = run(["bash", str(FB_HOME / "bin" / "start-minilm")], 40)
-    for _ in range(25):
-        if minilm_up():
-            break
+    for _ in range(15):
         time.sleep(1)
+        if _minilm_pid() is None and rc != 0:
+            break
     if minilm_up():
         st["fails"] = 0
         _note_start("minilm")
     else:
         st["fails"] += 1
         st["next"] = time.time() + min(600, 30 * 2 ** (st["fails"] - 1))
-        _note_start("minilm", f"did not come up (rc={rc}): {out[-200:]}")
+        _note_start("minilm", f"did not stay up (rc={rc}): {out[-200:]}")
     return True
 
 
@@ -648,11 +663,100 @@ def _note_start(name: str, err: str = "") -> None:
     _log(f"start {name}" + (f": {err}" if err else ""))
 
 
+# ------------------------------------------------------------------ FreeLLMAPI (the one LLM endpoint; optional)
+# Checked and started only when it is installed on this phone: ~/freellmapi plus ~/start-freellmapi.sh (which clears a stale
+# pid file and waits for /livez). Node sometimes dies under load (a libuv assertion) and nothing else restarts it.
+FREELLM_PORT = int(os.environ.get("FREELLM_PORT", "3001"))
+FREELLM_WAIT = 30  # seconds to wait for /livez after running the start script
+_freellm_state: dict = {"fails": 0, "next": 0.0}
+
+
+def freellm_script() -> Path:
+    return HOME / "start-freellmapi.sh"
+
+
+def freellm_installed() -> bool:
+    return (HOME / "freellmapi").is_dir() and freellm_script().is_file()
+
+
+def freellm_live() -> dict:
+    """GET /livez gives {"status": "ok", "version": ..., "uptime_s": ...}; {} when nothing healthy answers."""
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{FREELLM_PORT}/livez", timeout=1.5) as r:
+            d = json.loads(r.read(4096).decode("utf-8", "replace"))
+        return d if isinstance(d, dict) and d.get("status") == "ok" else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _freellm_hint() -> str:
+    """Why it is down, from its pid file and the end of its log."""
+    if _pid_alive(FB_HOME / "freellmapi.pid"):
+        return "The process is running but does not answer on /livez (still starting, or stuck)."
+    try:
+        with open(FB_HOME / "freellmapi.log", "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 4000))
+            tail = f.read().decode("utf-8", "replace")
+    except OSError:
+        tail = ""
+    if "uv__io_poll" in tail:
+        return "Node crashed (libuv uv__io_poll assertion, seen under load). Fix restarts it."
+    return f"Nothing answers on port {FREELLM_PORT}. Fix runs {freellm_script()}; log: {FB_HOME / 'freellmapi.log'}."
+
+
+def freellm_check() -> dict | None:
+    """The doctor row, or None when FreeLLMAPI is not installed here (then it is not part of the doctor)."""
+    if not freellm_installed():
+        return None
+    fl = freellm_live()
+    title = "FreeLLMAPI running" + (f" (v{str(fl['version'])[:20]})" if fl.get("version") else "")
+    return {"id": "freellmapi", "title": title, "ok": bool(fl), "detail": "" if fl else _freellm_hint()}
+
+
+def freellm_start(force: bool = False) -> bool:
+    """Runs the start script; True once /livez answers. Not while the recorded process is alive (it may just be slow to
+    start), unless forced by the Fix button."""
+    if freellm_live():
+        return True
+    if not force and _pid_alive(FB_HOME / "freellmapi.pid"):
+        return False
+    script = freellm_script()
+    if not script.is_file():
+        return False
+    spawn("freellmapi", ["bash", str(script)], FB_HOME / "freellmapi.start.log")
+    for _ in range(FREELLM_WAIT):
+        time.sleep(1)
+        if freellm_live():
+            _note_start("freellmapi")
+            return True
+    _note_start("freellmapi", f"did not answer /livez within {FREELLM_WAIT} s")
+    return False
+
+
+def _freellm_tend() -> bool:
+    """Supervisor step: start it when it is down. At most once a minute; after 5 failed tries it waits for the Fix button."""
+    st, now = _freellm_state, time.time()
+    if freellm_live():
+        st["fails"] = 0
+        return False
+    if st["fails"] >= 5 or now < st["next"] or _pid_alive(FB_HOME / "freellmapi.pid"):
+        return False
+    st["next"] = now + 60
+    if freellm_start():
+        st["fails"] = 0
+        return True
+    st["fails"] += 1
+    return False
+
+
 def service_states() -> dict:
     """Cheap per-service health (port and socket checks only): up, starting (started in the last 60 s) or down."""
     probes = {"router": router_up, "bridge": lambda: port_open(FB_PORT), "tts": lambda: port_open(TTS_PORT)}
     if minilm_enabled():
         probes["minilm"] = minilm_up
+    if freellm_installed():
+        probes["freellmapi"] = lambda: bool(freellm_live())
     out = {}
     for name, probe in probes.items():
         s = _svc.get(name, {})
@@ -717,6 +821,8 @@ def hermes_llm_url() -> str:
 def ensure() -> list[str]:
     """Start whatever is down (never restarts something that is up). Returns what it did."""
     did: list[str] = []
+    if freellm_installed() and _freellm_tend():
+        did.append("freellmapi")
     root = fastbrain_root()
     if root is not None and (FB_HOME / "app").is_dir():
         if not router_up():
@@ -837,6 +943,9 @@ def diagnose() -> dict:
             "llm_api_key_env is not set in hindsight-lite/config.json." if not env_name else f"{env_name} has no value in ~/.hermes/.env.", fix=False)
     fb = router_health()
     add("fastbrain_api", "FastBrain reports its version", bool(fb.get("version")), "FastBrain is down, or too old to report a version. Update it if the router check above is green.", fix=False)
+    fc = freellm_check()
+    if fc:
+        add(fc["id"], fc["title"], fc["ok"], fc["detail"])
     n = len(read_aliases())
     return {"ok": all(c["ok"] for c in checks if c["id"] not in ("dup_fastbrain",)), "checks": checks, "voices": sorted(have), "aliases": n,
             "services": service_states(), "fastbrain": fb, "task": dict(_task), "time": int(time.time())}
@@ -851,9 +960,9 @@ def _step(msg: str) -> None:
 
 def _pip(pkgs: list[str], py: str | None = None) -> tuple[int, str]:
     py = py or shutil.which("python3") or sys.executable
-    rc, out = run([py, "-m", "pip", "install", "--upgrade", *pkgs], 900)
+    rc, out = run([py, "-m", "pip", "install", *pkgs], 900)  # no --upgrade: never replace an install that works
     if rc != 0 and "externally-managed" in out.lower():
-        rc, out = run([py, "-m", "pip", "install", "--break-system-packages", "--upgrade", *pkgs], 900)
+        rc, out = run([py, "-m", "pip", "install", "--break-system-packages", *pkgs], 900)
     return rc, out
 
 
@@ -934,6 +1043,12 @@ def fix_all() -> None:
                 _KOKORO_ERR["msg"] = str(e)[:160]
                 break
         write_tts_server()
+        # FreeLLMAPI (only when it is installed on this phone): start it, and let the supervisor try afresh
+        if freellm_installed():
+            _freellm_state.update(fails=0, next=0.0)
+            if not freellm_live():
+                _step("Starting FreeLLMAPI")
+                freellm_start(force=True)
         # 4. start everything and check it
         _cache.clear()
         _step("Starting services")

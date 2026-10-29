@@ -515,20 +515,90 @@ def _on_post_approval_response(session_key=None, session_id=None, **kw):
         _send("clear", session=sid, what="approval")
 
 
+# ── provider-level error tracking ───────────────────────────────────────────
+# Tracks the last error time and error kind per provider (keyed by provider name/URL
+# extracted from the error message). Used to log useful diagnostics without making
+# retrying decisions (those belong in Hermes core).
+_provider_errors: dict[str, dict] = {}  # provider_key -> {"last": float, "count": int, "kind": str}
+_PERMANENT_CODES = frozenset({400, 401, 403, 404, 405, 422})  # never retry these
+
+
+def _extract_provider_key(error_msg: str, reason: str | None, status_code: int | None, kw: dict) -> str:
+    """Best-effort provider identifier from available context. Used for diagnostic logging only."""
+    # Check if Hermes passed a provider kwarg (future-proof; not in current hook interface).
+    p = kw.get("provider") or kw.get("provider_name") or kw.get("model_provider", "")
+    if p:
+        return str(p)
+    # Extract from error messages like "Error code: 429 - openrouter.ai…" or URLs in the message.
+    m = re.search(r"(openrouter\.ai|anthropic\.com|openai\.com|gemini\.google\.com|deepseek\.com|cohere\.com|mistral\.ai|groq\.com|together\.ai|fireworks\.ai)", error_msg, re.I)
+    return m.group(1).lower() if m else f"http_{status_code or 'unknown'}"
+
+
+def _classify_413(error_msg: str) -> str:
+    """Distinguish a rate-limit/TPM 413 (Hermes should back off) from an oversized-payload 413
+    (no retry will help — the context is too large for this model/provider).
+    Returns 'tpm' for token/rate-limit 413, 'payload' for oversized-payload 413, 'unknown' otherwise."""
+    msg_lower = error_msg.lower()
+    # Provider-specific rate-limit phrases
+    tpm_signals = ("tokens per minute", "tpm", "rate limit", "rate_limit", "quota", "too many requests",
+                   "capacity", "throttl", "overloaded")
+    payload_signals = ("request too large", "context length", "maximum context", "too long",
+                       "payload too large", "content length", "max_tokens exceeded", "token limit exceeded",
+                       "context window")
+    if any(s in msg_lower for s in payload_signals):
+        return "payload"
+    if any(s in msg_lower for s in tpm_signals):
+        return "tpm"
+    return "unknown"
+
+
 def _on_api_request_error(session_id=None, turn_id=None, status_code=None, retryable=None, retry_count=None,
-                          max_retries=None, reason=None, error=None, **_):
+                          max_retries=None, reason=None, error=None, **kw):
     # A turn whose model call fails for good (bad key, quota, unknown model…) ends with this hook and NO
     # session_end / post_llm_call, so the chip, the activity banner and the app's wake lock used to stay on
     # "Thinking" until STALE_AFTER. Retryable errors are retried by Hermes (a new stream_start follows).
     final = retryable is False or (retry_count is not None and max_retries is not None and retry_count >= max_retries)
     _dbg(f"api_error {session_id} turn={turn_id} status={status_code} retryable={retryable} final={final}")
+
+    # ── per-provider diagnostic logging ──────────────────────────────────────
+    # We log useful rate-limit and auth diagnostics here without making retry decisions.
+    # Permanent client-error codes (401, 403, 404…) should never be retried; log them once.
+    raw_msg = str((error.get("message") if isinstance(error, dict) else error) or reason or "")
+    if status_code is not None:
+        pkey = _extract_provider_key(raw_msg, reason, status_code, kw)
+        ps = _provider_errors.setdefault(pkey, {"last": 0.0, "count": 0, "kind": ""})
+        ps["count"] += 1
+        ps["last"] = time.time()
+
+        if status_code == 429:
+            # Rate limit: log with Retry-After if the header was forwarded via kwargs.
+            retry_after = kw.get("retry_after") or kw.get("headers", {}).get("retry-after") or kw.get("headers", {}).get("Retry-After")
+            ra_note = f" retry-after={retry_after}s" if retry_after else ""
+            _dbg(f"rate_limit provider={pkey} count={ps['count']}{ra_note} retryable={retryable}")
+            ps["kind"] = "rate_limit"
+
+        elif status_code == 413:
+            kind_413 = _classify_413(raw_msg)
+            ps["kind"] = f"413_{kind_413}"
+            _dbg(f"413 provider={pkey} kind={kind_413} retryable={retryable} msg={raw_msg[:120]}")
+            # Payload-413 cannot be fixed by retrying — log clearly so the user knows.
+            if kind_413 == "payload" and final:
+                _dbg(f"413 payload too large for provider={pkey}: no retry will help; context may need trimming")
+
+        elif status_code in _PERMANENT_CODES:
+            ps["kind"] = f"auth_{status_code}"
+            _dbg(f"permanent_error provider={pkey} status={status_code} retryable={retryable} (should not retry)")
+
+        elif status_code and status_code >= 500:
+            ps["kind"] = f"server_{status_code}"
+
     if not final or not session_id or session_id in _subagents:
         return
     review = _is_review(turn_id, session_id)
     _clear_status(session_id)
     if review:
         return
-    msg = str((error.get("message") if isinstance(error, dict) else error) or reason or "")
+    msg = raw_msg
     inner = re.search(r"""['"]message['"]\s*:\s*['"]([^'"]+)""", msg)  # "Error code: 401 - {'error': {'message': '…'}}"
     msg = inner.group(1) if inner else msg
     head = f"HTTP {status_code}" if status_code else ""

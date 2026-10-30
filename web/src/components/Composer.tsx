@@ -182,8 +182,8 @@ export function Composer({ injected, onInjected }: { injected: string | null; on
     }
   }
 
-  const offline = conn !== 'open' || !!opening
-  const placeholder = opening ? 'Opening your chat…' : offline ? 'Offline: type now, it sends when Hermes is back' : running ? 'Steer the running task…' : 'Message Hermes'
+  const offline = conn !== 'open'
+  const placeholder = offline ? 'Offline: type now, it sends when Hermes is back' : running ? 'Steer the running task…' : opening ? 'Loading chat…' : 'Message Hermes'
 
   // Fit the box to its text (or placeholder). Measure again when the placeholder changes and when Live mode
   // gives the box back: a chat switched while it was hidden was measured at the wrong width and stayed 2 rows.
@@ -485,7 +485,7 @@ export function Composer({ injected, onInjected }: { injected: string | null; on
             <span className="stop-square" />
           </button>
         ) : (
-          <button className="send" aria-label={running ? 'Steer' : conn !== 'open' ? 'Send when back online' : 'Send'} onClick={() => void send()} disabled={!text.trim() || busy || !!opening}>
+          <button className="send" aria-label={running ? 'Steer' : conn !== 'open' ? 'Send when back online' : 'Send'} onClick={() => void send()} disabled={!text.trim() || busy}>
             <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M3.4 20.4 21.85 12.5c.8-.35.8-1.5 0-1.84L3.4 2.6c-.66-.29-1.39.2-1.39.91L2 9.12c0 .5.37.93.87.99L17 12 2.87 13.88c-.5.07-.87.5-.87 1l.01 4.61c0 .71.73 1.2 1.39.91z"/></svg>
           </button>
         )}

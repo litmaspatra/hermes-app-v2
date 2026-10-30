@@ -876,7 +876,7 @@ public class HermesService extends Service {
             Bundle extras = new Bundle();
             extras.putBoolean("android.requestPromotedOngoing", true);
             b.addExtras(extras);
-            if (Build.VERSION.SDK_INT >= 36) b.setShortCriticalText(flashChip == null ? petEmoji() + "✨" : flashChip.replace("✅", petEmoji()));
+            if (Build.VERSION.SDK_INT >= 36) b.setShortCriticalText(flashChip == null ? petLabel() + " · Done" : flashChip.replace("✅", petLabel()));
         }
         b.setLargeIcon(petIcon());
         return b.build();
@@ -1305,38 +1305,42 @@ public class HermesService extends Service {
         return ic;
     }
 
-    /** A symbol for the chosen pet on the system chip (the chip can only show text). */
-    String petEmoji() {
-        switch (getSharedPreferences("hm", MODE_PRIVATE).getString("pet", "blob")) {
-            case "mika":
-                return "🌸";
-            case "cat":
-                return "🐱";
-            default:
-                return "🫧";
+    /** A short label for the chosen pet on the system chip (the chip can only show text). */
+    String petLabel() {
+        String pet = getSharedPreferences("hm", MODE_PRIVATE).getString("pet", "blob");
+        if (PetSprites.isSprite(pet)) {
+            // AgentPets slug like "ap-nezuko" → "Nezuko" (capitalised, max 8 chars)
+            String slug = pet.substring(PetSprites.PREFIX.length());
+            String first = slug.split("-")[0];
+            return first.isEmpty() ? "Pet" : first.substring(0, 1).toUpperCase(java.util.Locale.ROOT) + first.substring(1, Math.min(first.length(), 8));
+        }
+        switch (pet) {
+            case "mika": return "Mika";
+            case "cat":  return "Cat";
+            default:     return "Hermes";
         }
     }
 
     /** Short text for the system chip (Hyper Island), only used when the app's own island is off or both are wanted. */
     String petChip() {
-        String e = petEmoji();
+        String label = petLabel();
         switch (mood()) {
             case WORK: {
                 String s = lastShort == null ? "" : lastShort.trim();
-                return s.isEmpty() || s.length() > 6 ? e + "🔧" : e + " " + s;
+                return s.isEmpty() || s.length() > 8 ? label + " · Working" : label + " · " + s;
             }
             case ASK:
-                return e + "❓";
+                return label + " · Asking";
             case LEARN:
-                return e + "💡";
+                return label + " · Learning";
             case HAPPY:
-                return e + "✨";
+                return label + " · Done";
             case SAD:
-                return e + "💧";
+                return label + " · Error";
             case ALERT:
-                return e + "❗";
+                return label + " · Approve?";
             default:
-                return e + "💭";
+                return label + " · Ready";
         }
     }
 
@@ -1427,6 +1431,7 @@ public class HermesService extends Service {
             island.destroy();
             island = null;
         }
+        pushIsland(); // push latest state including pet species change
         postStatus(); // the system chip comes and goes with the app's own island
     }
 

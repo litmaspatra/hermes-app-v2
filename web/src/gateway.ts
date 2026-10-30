@@ -707,7 +707,15 @@ export async function searchMessages(q: string): Promise<MessageHit[]> {
 export async function sendPrompt(text: string): Promise<void> {
   const trimmed = text.trim()
   if (!trimmed) return
-  if (getState().opening) throw new Error('Still opening your chat — wait a moment')
+  // If a chat is being loaded, wait up to 8 s for it to finish instead of blocking the send button.
+  if (getState().opening) {
+    let waited = 0
+    while (getState().opening && waited < 8000) {
+      await new Promise(r => setTimeout(r, 100))
+      waited += 100
+    }
+    if (getState().opening) throw new Error('Chat is still loading — please try again in a moment')
+  }
   rememberPrompt(trimmed)
   let a = getState().active
   if (!a) a = await newSession()

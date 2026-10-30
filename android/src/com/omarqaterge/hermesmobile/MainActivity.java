@@ -183,6 +183,7 @@ public class MainActivity extends Activity {
         askPerm(getIntent());
         requestRuntimePermissions();
         handler.postDelayed(this::askIslandOnce, 5000);
+        publishAskShortcut(); // register "Ask Hermes" as a Direct Share target for drag-and-drop trays
         startHermes(); // no-op if already running; the supervisor script is idempotent
         web.loadUrl("file:///android_asset/www/index.html");
     }
@@ -385,6 +386,29 @@ public class MainActivity extends Activity {
         getIntent().removeExtra("shortcut");
         getIntent().setAction(Intent.ACTION_MAIN); // an ASSIST intent must not start Live mode again
         web.evaluateJavascript("window.hermesShortcut && window.hermesShortcut('" + sc + "')", null);
+    }
+
+    /** Publishes "Ask Hermes" as a Direct Share shortcut so it appears in drag-and-drop trays and share sheets. */
+    void publishAskShortcut() {
+        try {
+            android.content.pm.ShortcutManager sm = getSystemService(android.content.pm.ShortcutManager.class);
+            if (sm == null) return;
+            Intent askIntent = new Intent(this, ShareDropActivity.class)
+                    .setAction(Intent.ACTION_SEND)
+                    .setType("text/plain")
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            android.content.pm.ShortcutInfo ask = new android.content.pm.ShortcutInfo.Builder(this, "ask_hermes_drop")
+                    .setShortLabel("Ask Hermes")
+                    .setLongLabel("Ask Hermes")
+                    .setIcon(android.graphics.drawable.Icon.createWithResource(this, R.mipmap.ic_launcher))
+                    .setIntent(askIntent)
+                    .setCategories(new java.util.HashSet<>(java.util.Arrays.asList("com.omarqaterge.hermesmobile.category.ASK_HERMES")))
+                    .setRank(0)
+                    .build();
+            sm.addDynamicShortcuts(java.util.Collections.singletonList(ask));
+        } catch (Exception ignored) {
+            // not supported on older launchers
+        }
     }
 
     /** The last opened chat as a dynamic launcher shortcut (it opens through the existing "session" extra). */

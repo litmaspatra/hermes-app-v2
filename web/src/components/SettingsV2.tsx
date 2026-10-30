@@ -254,7 +254,29 @@ function PetGallery({ initial }: { initial: string }) {
       }
     }, 30)
   }
-  const sheet = (url: string) => ({ backgroundImage: `url(${url})`, backgroundSize: '800% 900%', backgroundPosition: '0 0', imageRendering: 'pixelated' as const })
+  // Thumbnail with CDN fallback: show a colored initial-badge when the sprite sheet URL is unreachable
+  const PetThumb = ({ slug, url, name }: { slug: string; url: string; name: string }) => {
+    const [failed, setFailed] = useState(false)
+    const initial = (name || slug).charAt(0).toUpperCase()
+    if (failed || !url) {
+      // Derive a consistent hue from the slug string
+      const hue = slug.split('').reduce((h, c) => (h * 31 + c.charCodeAt(0)) & 0xffff, 0) % 360
+      return (
+        <span className="pet-thumb" style={{ background: `hsl(${hue},60%,55%)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, fontWeight: 700, color: '#fff' }}>
+          {initial}
+        </span>
+      )
+    }
+    return (
+      <img
+        className="pet-thumb"
+        src={url}
+        alt={name}
+        style={{ objectFit: 'none', objectPosition: '0 0', imageRendering: 'pixelated', width: '100%', height: '100%' }}
+        onError={() => setFailed(true)}
+      />
+    )
+  }
   return (
     <>
       {mine.length > 0 && (
@@ -277,7 +299,7 @@ function PetGallery({ initial }: { initial: string }) {
         <div className="pet-grid">
           {list.map(p => (
             <button key={p.slug} className="pet-card" onClick={() => get(p)} disabled={busy === p.slug}>
-              <span className="pet-thumb" style={sheet(p.url)} />
+              <PetThumb slug={p.slug} url={p.url} name={p.name} />
               <span className="pet-name">{p.name}</span>
               <span className="pet-sub">{busy === p.slug ? 'Downloading…' : mine.includes(p.slug) ? 'Installed' : 'Tap to get'}</span>
             </button>

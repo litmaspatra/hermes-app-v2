@@ -1028,7 +1028,7 @@ def diagnose() -> dict:
     if prov == "mnemosyne":
         add("mnemosyne", "Mnemosyne present", hp is not None and cached("mnemosyne", lambda: py_ok(hp, "import mnemosyne")), "Mnemosyne is not importable in Hermes' Python.", fix=False)
     elif prov == "hindsight-lite":
-        add("hindsight", "Hindsight Lite present", hp is not None and cached("hindsight", lambda: py_ok(hp, "import hindsight_lite")), "Hindsight Lite is not importable in Hermes' Python.", fix=False)
+        add("hindsight", "Hindsight Lite present", hp is not None and cached("hindsight", lambda: py_ok(hp, "import hindsight_lite")), "Hindsight Lite is not importable in Hermes' Python. Tap Fix to install it.", fix=True)
         add("memory_write", "Hermes can save new memories on its own", bool(cfg.get("llm_model")),
             "hindsight-lite/config.json has no llm_model, so automatic retention is OFF: only an explicit hmem_remember saves. Set llm_base_url + llm_model (any small chat model).", fix=False)
         hl, hu = cfg.get("llm_base_url", ""), hermes_llm_url()
@@ -1113,6 +1113,15 @@ def fix_all() -> None:
             envf.parent.mkdir(parents=True, exist_ok=True)
             envf.write_text(env_text().rstrip("\n") + "\n" + ENV_BLOCK)
             envf.chmod(0o600)
+        # Hindsight Lite: install it into Hermes' own Python if missing
+        hp = hermes_py()
+        if hp and memory_provider() == "hindsight-lite" and not py_ok(hp, "import hindsight_lite"):
+            _step("Installing hindsight-lite into Hermes' Python")
+            rc, out = _pip(["hindsight-lite"], hp)
+            if rc != 0:
+                _step("hindsight-lite install failed: " + out[-200:])
+            else:
+                _cache.pop("hindsight", None)  # bust the cached import probe
         # direct Hindsight adapter, if the install didn't configure it
         hp = hermes_py()
         if hp and "FASTBRAIN_HINDSIGHT_CMD" not in env_text() and (FB_HOME / "bin" / "hindsight-direct.py").is_file() and py_ok(hp, "import hindsight_lite"):

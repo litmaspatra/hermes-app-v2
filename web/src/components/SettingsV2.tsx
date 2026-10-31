@@ -23,6 +23,7 @@ import { confirmDialog } from '../dialog'
 import { toast } from '../store'
 import { DoctorPanel } from './Doctor'
 import { installViaHermes } from '../pets'
+import { rpc } from '../gateway'
 import { memoryAliases, fastbrainStatus, haptic, importPet, installedPets, neuralTtsStatus, setTtsVoice, testVoice as testNaturalVoice, ttsVoices, installPet, petCatalog, selectPet, saveVoiceAliases, voiceAliases } from '../bridge'
 import { dynamicColorsOn, reduceEffectsOn, savedStyle, setDynamicColors, setReduceEffects, setStyle, type Style } from '../theme'
 import { Row, Section, Segmented, SelectRow, ToggleRow } from './ui'
@@ -222,15 +223,35 @@ function NaturalVoice() {
   )
 }
 
-/** The pet: only AgentPets pets (agentpets.dev). The first page of the catalogue shows at once; search narrows it. */
+/**
+ * Pet gallery — single source of truth is Hermes itself.
+ * "Your pets" = what Hermes already has installed (pet.gallery RPC).
+ * "Browse" = the agentpets.dev catalogue, installed via Hermes (pet.select RPC) so both sides stay in sync.
+ * Selecting any pet tells both Android (SharedPrefs) and Hermes (pet.select) at once.
+ */
 function PetGallery({ initial }: { initial: string }) {
   const [current, setCurrent] = useState(initial)
   const [q, setQ] = useState('')
   const [list, setList] = useState<{ slug: string; name: string; url: string }[]>([])
   const [more, setMore] = useState(false)
-  const [mine, setMine] = useState<string[]>(() => installedPets())
+  // hermesPets: slugs Hermes has installed (pet.gallery); localPets: spritesheets on Android (bridge)
+  const [hermesPets, setHermesPets] = useState<string[]>([])
+  const [localPets, setLocalPets] = useState<string[]>(() => installedPets())
   const [busy, setBusy] = useState('')
-  const load = (query: string, offset: number) => {
+
+  // Load Hermes gallery (non-blocking RPC) and local installed list on mount
+  useEffect(() => {
+    // Local pets synchronously
+    setLocalPets(installedPets())
+    // Hermes gallery asynchronously — will show what Hermes already has
+    rpc<{ pets?: { slug: string }[] }>('pet.gallery', {}, 30_000)
+      .then(g => setHermesPets((g.pets ?? []).map(p => p.slug)))
+      .catch(() => { /* Hermes not ready yet — show local only */ })
+    // Also pre-load the browse catalogue
+    loadCatalog('', 0)
+  }, [])
+
+  const loadCatalog = (query: string, offset: number) => {
     setBusy('list')
     setTimeout(() => {
       const r = petCatalog(query, offset)
@@ -240,26 +261,40 @@ function PetGallery({ initial }: { initial: string }) {
       if (!r.length && !offset) toast('No pets found (or no internet)', 'error')
     }, 30)
   }
-  useEffect(() => load('', 0), [])
+
+  /** Select an already-installed pet — update both Android and Hermes. */
+  const activate = async (slug: string) => {
+    haptic()
+    selectPet(slug) // Android SharedPrefs + island update immediately
+    setCurrent(slug)
+    // Also tell Hermes so its memory etc. stays in sync (fire-and-forget; if offline, Android already updated)
+    rpc('pet.select', { slug }, 30_000).catch(() => {})
+  }
+
+  /** Install from catalogue — always go through Hermes so both sides are in sync. */
   const get = (p: { slug: string; url: string }) => {
     setBusy(p.slug)
-    setTimeout(async () => {
-      let err = installPet(p.slug, p.url)
-      if (err) err = await installViaHermes(p.slug) // the phone can't reach the pet CDN: Hermes installs it and sends the sheet
+    // installViaHermes: calls pet.select RPC (Hermes downloads+activates) → pet.info → savePetSheet on Android
+    void installViaHermes(p.slug).then(err => {
       setBusy('')
       if (err) toast(`Couldn't install: ${err}`, 'error')
       else {
-        setMine(installedPets())
-        setCurrent(p.slug) // already made it the pet
+        const updated = installedPets()
+        setLocalPets(updated)
+        setHermesPets(prev => prev.includes(p.slug) ? prev : [...prev, p.slug])
+        setCurrent(p.slug)
       }
-    }, 30)
+    })
   }
-  // Thumbnail with CDN fallback: show a colored initial-badge when the sprite sheet URL is unreachable
+
+  // Combined "your pets" = union of Hermes-installed and locally installed, no duplicates
+  const allOwned = Array.from(new Set([...hermesPets, ...localPets]))
+
+  // Thumbnail with CDN fallback: colored initial-badge when the CDN image is unreachable in WebView
   const PetThumb = ({ slug, url, name }: { slug: string; url: string; name: string }) => {
     const [failed, setFailed] = useState(false)
     const initial = (name || slug).charAt(0).toUpperCase()
     if (failed || !url) {
-      // Derive a consistent hue from the slug string
       const hue = slug.split('').reduce((h, c) => (h * 31 + c.charCodeAt(0)) & 0xffff, 0) % 360
       return (
         <span className="pet-thumb" style={{ background: `hsl(${hue},60%,55%)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, fontWeight: 700, color: '#fff' }}>
@@ -277,38 +312,39 @@ function PetGallery({ initial }: { initial: string }) {
       />
     )
   }
+
   return (
     <>
-      {mine.length > 0 && (
-        <Section title="Your pets">
+      {allOwned.length > 0 && (
+        <Section title="Your pets" footer="Pets Hermes has installed. Tap one to activate it on both the island and Hermes.">
           <div className="pet-grid">
-            {mine.map(sl => (
-              <button key={sl} className={`pet-card${current === sl ? ' on' : ''}`} onClick={() => { haptic(); selectPet(sl); setCurrent(sl) }}>
-                <span className="pet-name">{sl}</span>
-                <span className="pet-sub">{current === sl ? 'In use' : 'Tap to use'}</span>
+            {allOwned.map(sl => (
+              <button key={sl} className={`pet-card${current === sl ? ' on' : ''}`} onClick={() => void activate(sl)} disabled={busy === sl}>
+                <span className="pet-name">{sl.replace(/^ap-/, '')}</span>
+                <span className="pet-sub">{busy === sl ? 'Switching…' : current === sl ? 'Active' : 'Tap to use'}</span>
               </button>
             ))}
           </div>
         </Section>
       )}
-      <Section title="Choose a pet" footer="Animated pets from agentpets.dev, made by the community. Tap one to download it (a few hundred KB) and use it. Nothing is bundled in the app.">
+      <Section title="Get more pets" footer="Browse agentpets.dev — the same catalogue Hermes uses. Tap a pet and Hermes downloads and activates it so the island and Hermes are always in sync.">
         <div style={{ display: 'flex', gap: 8, padding: '0 4px 8px' }}>
-          <input className="input" value={q} placeholder="Search by name" onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Enter' && load(q, 0)} style={{ flex: 1 }} />
-          <button className="pet-card" onClick={() => load(q, 0)} disabled={busy === 'list'}>Search</button>
+          <input className="input" value={q} placeholder="Search by name" onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Enter' && loadCatalog(q, 0)} style={{ flex: 1 }} />
+          <button className="pet-card" onClick={() => loadCatalog(q, 0)} disabled={busy === 'list'}>Search</button>
         </div>
         <div className="pet-grid">
           {list.map(p => (
             <button key={p.slug} className="pet-card" onClick={() => get(p)} disabled={busy === p.slug}>
               <PetThumb slug={p.slug} url={p.url} name={p.name} />
               <span className="pet-name">{p.name}</span>
-              <span className="pet-sub">{busy === p.slug ? 'Downloading…' : mine.includes(p.slug) ? 'Installed' : 'Tap to get'}</span>
+              <span className="pet-sub">{busy === p.slug ? 'Downloading…' : allOwned.includes(p.slug) ? 'Installed' : 'Tap to get'}</span>
             </button>
           ))}
         </div>
         {busy === 'list' && <div style={{ padding: 12, textAlign: 'center' }}>Loading…</div>}
         <label className="pet-card" style={{ display: 'block', margin: '8px 4px', cursor: 'pointer' }}>
           <span className="pet-name">Import a pet file</span>
-          <span className="pet-sub">If downloading fails: save the pet's spritesheet from agentpets.dev in your browser, then pick it here</span>
+          <span className="pet-sub">Pick a spritesheet image; it is saved on this phone and set as your pet.</span>
           <input
             type="file"
             accept="image/*"
@@ -321,7 +357,7 @@ function PetGallery({ initial }: { initial: string }) {
                 const err = importPet(f.name, String(r.result).split(',')[1] || '')
                 if (err) toast(`Couldn't import: ${err}`, 'error')
                 else {
-                  setMine(installedPets())
+                  setLocalPets(installedPets())
                   toast('Pet imported', 'info')
                 }
               }
@@ -329,7 +365,7 @@ function PetGallery({ initial }: { initial: string }) {
             }}
           />
         </label>
-        {more && busy !== 'list' && <Row title="Show more" chevron onClick={() => load(q, list.length)} />}
+        {more && busy !== 'list' && <Row title="Show more" chevron onClick={() => loadCatalog(q, list.length)} />}
       </Section>
     </>
   )

@@ -808,7 +808,7 @@ def freellm_check() -> dict | None:
 
 def freellm_start(force: bool = False) -> bool:
     """Runs the start script; True once /livez answers. Not while the recorded process is alive (it may just be slow to
-    start), unless forced by the Fix button."""
+    start), unless forced. When forced, spawn()'s internal backoff is cleared so it actually relaunches."""
     if freellm_live():
         return True
     if not force and _pid_alive(FB_HOME / "freellmapi.pid"):
@@ -816,6 +816,9 @@ def freellm_start(force: bool = False) -> bool:
     script = freellm_script()
     if not script.is_file():
         return False
+    if force:
+        # Clear spawn()'s internal restart-backoff so the forced restart actually runs
+        _spawn_state.pop("freellmapi", None)
     spawn("freellmapi", ["bash", str(script)], FB_HOME / "freellmapi.start.log")
     for _ in range(FREELLM_WAIT):
         time.sleep(1)
@@ -827,18 +830,33 @@ def freellm_start(force: bool = False) -> bool:
 
 
 def _freellm_tend() -> bool:
-    """Supervisor step: start it when it is down. At most once a minute; after 5 failed tries it waits for the Fix button."""
+    """Supervisor step: start it when it is down.
+    Uses exponential backoff (60 s → 120 s → 240 s → 300 s max).  After the process has been gone
+    for 10 minutes the fail counter resets so it tries again with a clean slate — this handles
+    reboots, Termux restarts, and OOM kills without needing the Fix button."""
     st, now = _freellm_state, time.time()
     if freellm_live():
         st["fails"] = 0
+        st["down_since"] = 0.0
         return False
-    if st["fails"] >= 5 or now < st["next"] or _pid_alive(FB_HOME / "freellmapi.pid"):
+    # Record when it first went down so we can reset after a long gap
+    if not st.get("down_since"):
+        st["down_since"] = now
+    elif now - st["down_since"] > 600:  # 10 min — reset and try fresh
+        st.update(fails=0, next=0.0, down_since=now)
+    if now < st.get("next", 0.0):
         return False
-    st["next"] = now + 60
+    # Don't start while the old process is still alive (it may be slow) unless it has been stuck for >90 s
+    pid_file = FB_HOME / "freellmapi.pid"
+    if _pid_alive(pid_file) and now - st.get("down_since", now) < 90:
+        return False
+    # Exponential backoff: 60, 120, 240, 300 s
+    delay = min(60 * (2 ** st.get("fails", 0)), 300)
+    st["next"] = now + delay
     if freellm_start():
-        st["fails"] = 0
+        st.update(fails=0, down_since=0.0)
         return True
-    st["fails"] += 1
+    st["fails"] = st.get("fails", 0) + 1
     return False
 
 
@@ -1150,7 +1168,7 @@ def fix_all() -> None:
         write_tts_server()
         # FreeLLMAPI (only when it is installed on this phone): start it, and let the supervisor try afresh
         if freellm_installed():
-            _freellm_state.update(fails=0, next=0.0)
+            _freellm_state.update(fails=0, next=0.0, down_since=0.0)
             if not freellm_live():
                 _step("Starting FreeLLMAPI")
                 freellm_start(force=True)

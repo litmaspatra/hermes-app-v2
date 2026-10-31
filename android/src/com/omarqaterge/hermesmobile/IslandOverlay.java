@@ -654,7 +654,9 @@ final class IslandOverlay {
         lp = new WindowManager.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL   // lets inter-app drag events reach us (Android 13+)
+                        | WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH, // receive drag that starts outside our bounds
                 PixelFormat.TRANSLUCENT);
         lp.gravity = Gravity.TOP | Gravity.START; // x and y are absolute, so the pet can sit at either side
         lp.x = Math.max(0, (svc.getResources().getDisplayMetrics().widthPixels - dp(120)) / 2);
@@ -930,10 +932,13 @@ final class IslandOverlay {
         switch (e.getAction()) {
             case DragEvent.ACTION_DRAG_STARTED: {
                 ClipDescription d = e.getClipDescription();
-                if (d == null || d.getMimeTypeCount() == 0 || suppressed) return false;
+                if (d == null || d.getMimeTypeCount() == 0) return false;
+                // Always return true so the system registers us as a valid drop target for inter-app
+                // drags (Funtouch OS drag tray, share-to-island). Even when suppressed we accept the
+                // drag session; we just won't process the drop if still suppressed at ACTION_DROP.
                 dragging = true;
                 hovering = false;
-                dodge();
+                if (!suppressed) dodge();
                 render();
                 return true;
             }
@@ -950,7 +955,7 @@ final class IslandOverlay {
             case DragEvent.ACTION_DROP:
                 return onDrop(e);
             case DragEvent.ACTION_DRAG_ENDED:
-                undodge();
+                if (!suppressed) undodge();
                 dragging = false;
                 hovering = false;
                 render();
